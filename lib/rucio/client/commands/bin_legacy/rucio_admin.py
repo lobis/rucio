@@ -82,7 +82,7 @@ def add_account(args, client, logger, console, spinner):
 
     """
     client.add_account(account=args.account, type_=args.account_type, email=args.account_email)
-    print('Added new account: %s' % args.account)
+    print(f"Added new account: {args.account}")
     return SUCCESS
 
 
@@ -94,8 +94,8 @@ def delete_account(args, client, logger, console, spinner):
     Delete account.
 
     """
-    client.delete_account(args.acnt)
-    print('Deleted account: %s' % args.acnt)
+    client.delete_account(args.account)
+    print(f"Deleted account: {args.account}")
     return SUCCESS
 
 

@@ -74,7 +74,7 @@ class Account(CommandBase):
         parser.add_argument("--ban", type=bool, choices=(True, False), help='Ban the account, to disable it. Use --ban False to unban.', default=None)
 
     def remove_namespace(self, parser: "ArgumentParser") -> None:
-        parser.add_argument("-a", "--account", dest="acnt", action="store", help="Account name", required=True)
+        parser.add_argument("-a", "--account", dest="account", action="store", help="Account name", required=True)
 
     def _operations(self) -> dict[str, "OperationDict"]:
         return {
