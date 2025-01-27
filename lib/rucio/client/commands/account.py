@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 from argparse import SUPPRESS
 from typing import TYPE_CHECKING
 
@@ -60,9 +61,9 @@ class Account(CommandBase):
         parser.add_argument("--filters", dest="filters", action="store", help="Filter arguments in form `key=value,another_key=next_value`")
 
     def add_namespace(self, parser: "ArgumentParser") -> None:
-        parser.add_argument("--type", dest="accounttype", help="Account Type (USER, GROUP, SERVICE)", required=True)
+        parser.add_argument("--type", dest="account_type", help="Account Type", choices={"USER", "GROUP", "SERVICE"}, required=True)
         parser.add_argument("-a", "--account", dest="account", help="Account name", required=True)
-        parser.add_argument("--email", dest="accountemail", help="Add an email address associated with the account")
+        parser.add_argument("--email", dest="account_email", help="Add an email address associated with the account")
 
     def show_namespace(self, parser: "ArgumentParser") -> None:
         parser.add_argument("-a", "--account", dest="account", help="Account name", required=True)

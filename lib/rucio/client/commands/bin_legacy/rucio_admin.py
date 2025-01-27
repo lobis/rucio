@@ -82,7 +82,7 @@ def add_account(args, client, logger, console, spinner):
     Adds a new account. Specify metadata fields as arguments.
 
     """
-    client.add_account(account=args.account, type_=args.accounttype, email=args.accountemail)
+    client.add_account(account=args.account, type_=args.account_type, email=args.account_email)
     print('Added new account: %s' % args.account)
     return SUCCESS
 
