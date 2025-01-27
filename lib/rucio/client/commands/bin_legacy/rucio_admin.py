@@ -71,7 +71,6 @@ def get_scope(did, client):
         scopes = client.list_scopes()
         scope, name = extract_scope(did, scopes)
         return scope, name
-    return None, did
 
 
 @exception_handler
