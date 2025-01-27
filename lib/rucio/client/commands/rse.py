@@ -148,10 +148,14 @@ class Distance(RSE):
 
     def _operations(self) -> dict[str, "OperationDict"]:
         return {
-            "list": {"call": self.list_, "docs": "Show distances between RSEs"},
+            "list": {"call": self.list_, "docs": "Show distances between RSEs",
+                     "namespace": lambda x: self.namespace(x, distance=False)},
             "add": {"call": self.add, "docs": "Add or update a distance between RSEs"},
-            "remove": {"call": self.remove, "docs": "Delete the distance between a pair of RSEs. The mandatory parameters are source and destination"},
-            "set": {"call": self.set_, "docs": "Update the distance between a pair of RSE that already have a distance between them"},
+            "remove": {"call": self.remove,
+                       "docs": "Delete the distance between a pair of RSEs. The mandatory parameters are source and destination",
+                       "namespace": lambda x: self.namespace(x, distance=False)},
+            "set": {"call": self.set_,
+                    "docs": "Update the distance between a pair of RSE that already have a distance between them"},
         }
 
     def usage_example(self) -> list[str]:
@@ -162,10 +166,11 @@ class Distance(RSE):
             "$ rucio rse distance set --source rse1 --destination rse2 --distance 20  # Update an existing distance",
         ]
 
-    def namespace(self, parser: "ArgumentParser") -> None:
+    def namespace(self, parser: "ArgumentParser", distance: bool = True) -> None:
         parser.add_argument("--source", dest="source", action="store", help="Source RSE name")
         parser.add_argument("--destination", dest="destination", action="store", help="Destination RSE name")
-        parser.add_argument("--distance", dest="distance", type=int, help="Distance between RSEs")
+        if distance:
+            parser.add_argument("--distance", dest="distance", type=int, help="Distance between RSEs")
 
     def list_(self):
         get_distance_rses(self.args, self.client, self.logger, self.console, self.spinner)
