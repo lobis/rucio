@@ -63,14 +63,14 @@ class Account(CommandBase):
     def add_namespace(self, parser: "ArgumentParser") -> None:
         parser.add_argument("--type", dest="account_type", help="Account Type", choices={"USER", "GROUP", "SERVICE"}, required=True)
         parser.add_argument("-a", "--account", dest="account", help="Account name", required=True)
-        parser.add_argument("--email", dest="account_email", help="Add an email address associated with the account")
+        parser.add_argument("--email", dest="email", help="Add an email address associated with the account")
 
     def show_namespace(self, parser: "ArgumentParser") -> None:
         parser.add_argument("-a", "--account", dest="account", help="Account name", required=True)
 
     def update_namespace(self, parser: "ArgumentParser") -> None:
         parser.add_argument("-a", "--account", help="Account name", required=True)
-        parser.add_argument("--email", help="Account email")
+        parser.add_argument("--email", dest="email", help="Account email")
         parser.add_argument("--ban", type=bool, choices=(True, False), help='Ban the account, to disable it. Use --ban False to unban.', default=None)
 
     def remove_namespace(self, parser: "ArgumentParser") -> None:
