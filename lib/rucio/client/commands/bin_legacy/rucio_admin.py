@@ -82,7 +82,7 @@ def add_account(args, client, logger, console, spinner):
 
     """
     client.add_account(account=args.account, type_=args.account_type, email=args.account_email)
-    print(f"Added new account: {args.account}")
+    print('Added new account: %s' % args.account)
     return SUCCESS
 
 
@@ -95,7 +95,7 @@ def delete_account(args, client, logger, console, spinner):
 
     """
     client.delete_account(args.account)
-    print(f"Deleted account: {args.account}")
+    print('Deleted account: %s' % args.account)
     return SUCCESS
 
 
@@ -267,11 +267,11 @@ def identity_add(args, client, logger, console, spinner):
         logger.error('Error: --email argument can\'t be an empty string. Failed to grant an identity access to an account')
         return FAILURE
 
-    if args.auth_type == 'USERPASS' and not args.password:
+    if args.authtype == 'USERPASS' and not args.password:
         logger.error('missing --password argument')
         return FAILURE
 
-    client.add_identity(account=args.account, identity=args.identity, authtype=args.auth_type, email=args.email, password=args.password)
+    client.add_identity(account=args.account, identity=args.identity, authtype=args.authtype, email=args.email, password=args.password)
     print('Added new identity to account: %s-%s' % (args.identity, args.account))
     return SUCCESS
 
@@ -284,7 +284,7 @@ def identity_delete(args, client, logger, console, spinner):
     Revoke an identity's access to an account.
 
     """
-    client.del_identity(args.account, args.identity, authtype=args.auth_type)
+    client.del_identity(args.account, args.identity, authtype=args.authtype)
     print('Deleted identity: %s' % args.identity)
     return SUCCESS
 

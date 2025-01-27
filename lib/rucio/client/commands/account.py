@@ -187,10 +187,10 @@ class Identity(Account):
 
     def namespace(self, parser: "ArgumentParser") -> None:
         parser.add_argument("--account", dest="account", action="store", help="Account name", required=True)
-        parser.add_argument("--type", dest="auth_type", action="store", choices={"X509", "GSS", "USERPASS", "SSH", "SAML", "OIDC"}, help="Authentication type")
+        parser.add_argument("--type", dest="authtype", action="store", choices={"X509", "GSS", "USERPASS", "SSH", "SAML", "OIDC"}, help="Authentication type")
         parser.add_argument("--id", dest="identity", action="store", help="Identity as a DNs for X509 IDs")
         parser.add_argument("--email", dest="email", action="store", help="Email address associated with the identity")
-        parser.add_argument("--password", dest="password", action="store", help="Password if auth_type is USERPASS")
+        parser.add_argument("--password", dest="password", action="store", help="Password if type is USERPASS")
         parser.add_argument("--human", default=True, help=SUPPRESS)
 
     def _operations(self) -> dict[str, "OperationDict"]:
