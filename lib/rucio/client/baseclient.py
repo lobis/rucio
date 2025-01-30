@@ -717,11 +717,13 @@ class BaseClient:
         client_key = None
         if self.auth_type == 'x509':
             url = build_url(self.auth_host, path='auth/x509')
+            self.logger.debug(f"Getting token for x509 authentication from {url}")
             client_cert = self.creds['client_cert']
             if 'client_key' in self.creds:
                 client_key = self.creds['client_key']
         elif self.auth_type == 'x509_proxy':
             url = build_url(self.auth_host, path='auth/x509_proxy')
+            self.logger.debug(f"Getting token for x509_proxy authentication from {url}")
             client_cert = self.creds['client_proxy']
 
         if (client_cert is not None) and not (path.exists(client_cert)):
@@ -940,6 +942,7 @@ class BaseClient:
             except Exception:
                 raise
 
+        self.logger.debug(f"Writing token to '{self.token_file}'")
         try:
             file_d, file_n = mkstemp(dir=self.token_path)
             with fdopen(file_d, "w") as f_token:
