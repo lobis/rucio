@@ -152,6 +152,7 @@ class BaseClient:
         self.auth_oidc_refresh_before_exp = config_get_int('client', 'auth_oidc_refresh_before_exp', False, 20)
 
         self.auth_type = self._get_auth_type(auth_type)
+        self.logger.debug(f"Auth type: {self.auth_type}")
         self.creds = self._get_creds(creds)
 
         rucio_scheme = urlparse(self.host).scheme
@@ -250,9 +251,11 @@ class BaseClient:
                 if environ['RUCIO_AUTH_TYPE'] not in ['userpass', 'x509', 'x509_proxy', 'gss', 'ssh', 'saml', 'oidc']:
                     raise MissingClientParameter('Possible RUCIO_AUTH_TYPE values: userpass, x509, x509_proxy, gss, ssh, saml, oidc, vs. ' + environ['RUCIO_AUTH_TYPE'])
                 auth_type = environ['RUCIO_AUTH_TYPE']
+                self.logger.debug(f"Auth type found in environment variable 'RUCIO_AUTH_TYPE': {auth_type}")
             else:
                 try:
                     auth_type = config_get('client', 'auth_type')
+                    self.logger.debug(f"Auth type found in config file: {auth_type}")
                 except (NoOptionError, NoSectionError) as error:
                     raise MissingClientParameter('Option \'%s\' cannot be found in config file' % error.args[0])
         return auth_type
@@ -316,6 +319,7 @@ class BaseClient:
                 if 'client_proxy' not in creds or creds['client_proxy'] is None:
                     try:
                         creds['client_proxy'] = path.abspath(path.expanduser(path.expandvars(config_get('client', 'client_x509_proxy'))))
+                        self.logger.debug(f"x509 proxy found in config file: {creds['client_proxy']}")
                     except NoOptionError:
                         # Recreate the classic GSI logic for locating the proxy:
                         # - $X509_USER_PROXY, if it is set.
@@ -323,6 +327,7 @@ class BaseClient:
                         # If neither exists (at this point, we don't care if it exists but is invalid), then rethrow
                         if 'X509_USER_PROXY' in environ:
                             creds['client_proxy'] = environ['X509_USER_PROXY']
+                            self.logger.debug(f"x509 proxy found in environment variable 'X509_USER_PROXY': {creds['client_proxy']}")
                         else:
                             fname = '/tmp/x509up_u%d' % geteuid()
                             if path.exists(fname):
