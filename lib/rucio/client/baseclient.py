@@ -166,10 +166,13 @@ class BaseClient:
         if (rucio_scheme == 'https' or auth_scheme == 'https') and ca_cert is None:
             self.logger.debug('HTTPS is required, but no ca_cert was passed. Trying to get it from X509_CERT_DIR.')
             self.ca_cert = os.environ.get('X509_CERT_DIR', None)
-            if self.ca_cert is None:
+            if self.ca_cert is not None:
+                self.logger.debug(f"ca_cert found in environment variable 'X509_CERT_DIR': {self.ca_cert}")
+            else:
                 self.logger.debug('HTTPS is required, but no ca_cert was passed and X509_CERT_DIR is not defined. Trying to get it from the config file.')
                 try:
                     self.ca_cert = path.expandvars(config_get('client', 'ca_cert'))
+                    self.logger.debug(f"ca_cert found in config file: {self.ca_cert}")
                 except (NoOptionError, NoSectionError):
                     self.logger.debug('No ca_cert found in configuration. Falling back to Mozilla default CA bundle (certifi).')
                     self.ca_cert = True
@@ -181,28 +184,35 @@ class BaseClient:
             self.logger.debug('No account passed. Trying to get it from the RUCIO_ACCOUNT environment variable or the config file.')
             try:
                 self.account = environ['RUCIO_ACCOUNT']
+                self.logger.debug(f"Account found in environment variable 'RUCIO_ACCOUNT': {self.account}")
             except KeyError:
                 try:
                     self.account = config_get('client', 'account')
+                    self.logger.debug(f"Account found in config file: {self.account}")
                 except (NoOptionError, NoSectionError):
                     pass
 
         if vo is not None:
             self.vo = vo
+            self.logger.debug(f"VO passed: {vo}")
         else:
             self.logger.debug('No VO passed. Trying to get it from environment variable RUCIO_VO.')
             try:
                 self.vo = environ['RUCIO_VO']
+                self.logger.debug(f"VO found in environment variable 'RUCIO_VO': {self.vo}")
             except KeyError:
                 self.logger.debug('No VO found. Trying to get it from the config file.')
                 try:
                     self.vo = config_get('client', 'vo')
+                    self.logger.debug(f"VO found in config file: {self.vo}")
                 except (NoOptionError, NoSectionError):
                     self.logger.debug('No VO found. Using default VO.')
                     self.vo = 'def'
+                    self.logger.debug(f"VO set to default: {self.vo}")
                 except ConfigNotFound:
                     self.logger.debug('No configuration found. Using default VO.')
                     self.vo = 'def'
+                    self.logger.debug(f"VO set to default: {self.vo}")
 
         self.auth_token_file_path, self.token_exp_epoch_file, self.token_file, self.token_path = self._get_auth_tokens()
         self.__authenticate()
