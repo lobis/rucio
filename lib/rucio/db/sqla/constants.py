@@ -87,6 +87,7 @@ class DIDType(Enum):
 class OpenDataDIDState(Enum):
     PUBLIC = 'P'
     DRAFT = 'D'
+    SUSPENDED = 'S'
 
 
 class IdentityType(Enum):
