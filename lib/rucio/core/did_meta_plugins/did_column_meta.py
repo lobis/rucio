@@ -16,7 +16,7 @@ import operator
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
-from sqlalchemy import inspect, update, case
+from sqlalchemy import case, inspect, update
 from sqlalchemy.exc import CompileError, InvalidRequestError, NoResultFound
 from sqlalchemy.sql import func
 from sqlalchemy.sql.expression import true
