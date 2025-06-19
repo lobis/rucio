@@ -56,7 +56,7 @@ class DidColumnMeta(DidMetaPlugin):
             # We check for the existence of the OpenDataDid table to improve backwards compatibility with older database schemas.
             # At some point this check can be removed, and the code can be simplified (only running the else branch).
             opendata_table_exists = session.get_bind() is not None and inspect(session.get_bind()).has_table(models.OpenDataDid.__tablename__)
-            if not opendata_table_exists:
+            if not opendata_table_exists or True:
                 row = session.query(models.DataIdentifier).filter_by(scope=scope, name=name). \
                     with_hint(models.DataIdentifier, "INDEX(DIDS DIDS_PK)", 'oracle').one()
                 return row.to_dict()
