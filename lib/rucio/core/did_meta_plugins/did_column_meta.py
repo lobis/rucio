@@ -16,7 +16,7 @@ import operator
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
-from sqlalchemy import inspect, update
+from sqlalchemy import inspect, update, case
 from sqlalchemy.exc import CompileError, InvalidRequestError, NoResultFound
 from sqlalchemy.sql import func
 from sqlalchemy.sql.expression import true
@@ -53,9 +53,36 @@ class DidColumnMeta(DidMetaPlugin):
         :param session: The database session in use.
         """
         try:
-            row = session.query(models.DataIdentifier).filter_by(scope=scope, name=name).\
-                with_hint(models.DataIdentifier, "INDEX(DIDS DIDS_PK)", 'oracle').one()
-            return row.to_dict()
+            # We check for the existence of the OpenDataDid table to improve backwards compatibility with older database schemas.
+            # At some point this check can be removed, and the code can be simplified (only running the else branch).
+            opendata_table_exists = inspect(session.bind).has_table(models.OpenDataDid.__tablename__)
+            if not opendata_table_exists:
+                row = session.query(models.DataIdentifier).filter_by(scope=scope, name=name). \
+                    with_hint(models.DataIdentifier, "INDEX(DIDS DIDS_PK)", 'oracle').one()
+                return row.to_dict()
+            else:
+                row = session.query(
+                    models.DataIdentifier,
+                    case(
+                        (models.OpenDataDid.scope != None, True),
+                        else_=False
+                    ).label("is_opendata")
+                ).outerjoin(
+                    models.OpenDataDid,
+                    (models.DataIdentifier.scope == models.OpenDataDid.scope) &
+                    (models.DataIdentifier.name == models.OpenDataDid.name)
+                ).with_hint(
+                    models.DataIdentifier, "INDEX(DIDS DIDS_PK)", "oracle"
+                ).filter_by(
+                    scope=scope,
+                    name=name
+                ).one()
+
+                data_identifier, is_opendata = row
+                result = data_identifier.to_dict()
+                result["is_opendata"] = is_opendata
+                return result
+
         except NoResultFound:
             raise exception.DataIdentifierNotFound(f"Data identifier '{scope}:{name}' not found")
 
