@@ -79,7 +79,9 @@ class DidColumnMeta(DidMetaPlugin):
                 row = query.first()
                 if row is None:
                     # Otherwise a 'TypeError: cannot unpack non-iterable NoneType object' is raised
+                    # This will be converted to a 'DataIdentifierNotFound' by the except block
                     raise NoResultFound
+
                 data_identifier, is_opendata = row
                 result = data_identifier.to_dict()
                 result["is_opendata"] = is_opendata
