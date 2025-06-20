@@ -33,16 +33,12 @@ def list_opendata_dids(
         offset: Optional[int] = None,
         state: Optional[str] = None,
         session: "Session"
-        # ) -> "Iterator[dict[str, Any]]":
-) -> list[Any]:
-    print(f"GATEWAY list_opendata_dids called with limit={limit}, offset={offset}, state={state}")
+) -> dict[str, list[dict[str, Any]]]:
     state_enum = None
     if state:
         check_valid_opendata_did_state(state)
         state_enum = opendata_state_str_to_enum(state)
     result = opendata.list_opendata_dids(limit=limit, offset=offset, state=state_enum, session=session)
-    print(f"GATEWAY list_opendata_dids result: {result}")
-    # yield from (gateway_update_return_dict(d, session=session) for d in result)
     return result
 
 
@@ -55,14 +51,12 @@ def get_opendata_did(
         vo: str = "def",
         session: "Session"
 ) -> dict[str, Any]:
-    print(f"GATEWAY get_opendata_did called with scope={scope}, name={name}, state={state}, vo={vo}")
     internal_scope = InternalScope(scope, vo=vo)
     state_enum = None
     if state:
         check_valid_opendata_did_state(state)
         state_enum = opendata_state_str_to_enum(state)
     result = opendata.get_opendata_did(scope=internal_scope, name=name, state=state_enum, session=session)
-    print(f"get_opendata_did result: {result}")
     return gateway_update_return_dict(result, session=session)
 
 
@@ -112,9 +106,6 @@ def update_opendata_did(
         except ValueError as error:
             raise ValueError(f"Invalid JSON: {error}")
 
-    if opendata_json:
-        print("GATEWAY update_opendata_did opendata_json type: ", type(opendata_json))
-
     return opendata.update_opendata_did(scope=internal_scope,
                                         name=name,
                                         state=state_enum,
@@ -129,8 +120,6 @@ def get_opendata_did_files(
         vo: str = "def",
         session: "Session"
 ) -> dict[str, Any]:
-    print(f"GATEWAY get_opendata_did_files called with scope={scope}, name={name}, vo={vo}")
     internal_scope = InternalScope(scope, vo=vo)
     result = opendata.get_opendata_did_files(scope=internal_scope, name=name, session=session)
-    print(f"get_opendata_did result: {result}")
     return gateway_update_return_dict(result, session=session)

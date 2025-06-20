@@ -69,7 +69,7 @@ def list_opendata_dids(
         offset: Optional[int] = None,
         state: Optional[OpenDataDIDState] = None,
         session: "Session"
-) -> list[dict[str, Any]]:
+) -> dict[str, list[dict[str, Any]]]:
     query = select(
         models.OpenDataDid.scope,
         models.OpenDataDid.name,
@@ -80,8 +80,6 @@ def list_opendata_dids(
         models.OpenDataDid.updated_at
     )
 
-    print(f"Called list_opendata_dids with limit={limit}, offset={offset}, state={state}")
-
     if limit is not None:
         query = query.limit(limit)
 
@@ -91,10 +89,16 @@ def list_opendata_dids(
     if state is not None:
         query = query.where(models.OpenDataDid.state == state)
 
-    print(f"Query: {query}")
+    dids = [{"scope": scope, "name": name, "state": state, "created_at": created_at, "updated_at": updated_at} for
+                 scope, name, state, created_at, updated_at in session.execute(query)]
 
-    return [{"scope": scope, "name": name, "state": state, "created_at": created_at, "updated_at": updated_at} for
-            scope, name, state, created_at, updated_at in session.execute(query)]
+    response = {
+        "total": len(dids),
+        "offset": offset if offset is not None else 0,
+        "dids": dids,
+    }
+
+    return response
 
 
 @read_session

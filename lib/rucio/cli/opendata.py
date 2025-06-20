@@ -57,13 +57,9 @@ def opendata() -> None:
               help="Perform request against the public endpoint")
 @click.pass_context
 def list_opendata_dids(ctx: "Context", state: str, public: bool) -> None:
-    # TODO: check state is valid
     client = ctx.obj.client
-    print(f"DEBUG: Listing Open Data DIDs with state '{state}' and public flag '{public}'")
     result = client.list_opendata_dids(state=state, public=public)
-    for i, entry in enumerate(result):
-        print(f"OpenData entry {i}: {entry}")
-        print(entry)
+    print(json.dumps(result, indent=4, sort_keys=True, ensure_ascii=False))
 
 
 @opendata.command("add")
@@ -71,7 +67,6 @@ def list_opendata_dids(ctx: "Context", state: str, public: bool) -> None:
 @click.pass_context
 def add_opendata_did(ctx: "Context", did: str) -> None:
     client = ctx.obj.client
-    print(f"DEBUG: Adding Open Data DID with '{did}'")
     scope, name = extract_scope_name(did)
     client.add_opendata_did(scope=scope, name=name)
 
@@ -81,7 +76,6 @@ def add_opendata_did(ctx: "Context", did: str) -> None:
 @click.pass_context
 def remove_opendata_did(ctx: "Context", did: str) -> None:
     client = ctx.obj.client
-    print(f"DEBUG: Removing Open Data DID with '{did}'")
     scope, name = extract_scope_name(did)
     client.remove_opendata_did(scope=scope, name=name)
 

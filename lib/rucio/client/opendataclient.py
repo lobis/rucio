@@ -61,8 +61,7 @@ class OpenDataClient(BaseClient):
 
         r = self._send_request(url, type_='GET', params=params)
         if r.status_code == codes.ok:
-            result = self._load_json_data(r)
-            return result
+            return json.loads(next(self._load_json_data(r)))
         else:
             exc_cls, exc_msg = self._get_exception(headers=r.headers, status_code=r.status_code, data=r.content)
             raise exc_cls(exc_msg)

@@ -207,7 +207,7 @@ class TestOpenDataCore:
             add_did(scope=did["scope"], name=did["name"], account=root_account, did_type=DIDType.DATASET)
             opendata.add_opendata_did(scope=did["scope"], name=did["name"])
 
-        opendata_dids = opendata.list_opendata_dids()
+        opendata_dids = opendata.list_opendata_dids()["dids"]
 
         for did in dids:
             index = next(i for i, d in enumerate(opendata_dids) if d["name"] == did["name"])
@@ -219,7 +219,7 @@ class TestOpenDataCore:
         did_private_name = did_name_generator(did_type="dataset")
         did_public_name = did_name_generator(did_type="dataset")
 
-        opendata_public_number_before = len(opendata.list_opendata_dids(state=OpenDataDIDState.PUBLIC))
+        opendata_public_number_before = len(opendata.list_opendata_dids(state=OpenDataDIDState.PUBLIC)["dids"])
 
         # Add it as a DID
         add_did(scope=mock_scope, name=did_private_name, account=root_account, did_type=DIDType.DATASET)
@@ -233,7 +233,7 @@ class TestOpenDataCore:
         set_status(scope=mock_scope, name=did_public_name, open=False)
         opendata.update_opendata_did(scope=mock_scope, name=did_public_name, state=OpenDataDIDState.PUBLIC)
 
-        opendata_public_number_after = len(opendata.list_opendata_dids(state=OpenDataDIDState.PUBLIC))
+        opendata_public_number_after = len(opendata.list_opendata_dids(state=OpenDataDIDState.PUBLIC)["dids"])
 
         # List open data DIDs
         assert opendata_public_number_after - opendata_public_number_before == 1, "Public number should be 1 more"

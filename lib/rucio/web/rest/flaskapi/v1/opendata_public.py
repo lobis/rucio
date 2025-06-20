@@ -27,13 +27,11 @@ class OpenDataPublicView(ErrorHandlingMethodView):
     # Should this be a stream?
     @check_accept_header_wrapper_flask(["application/json"])
     def get(self) -> "Response":
-        print(f"OpenDataPrivateView.get() called")
         try:
             limit = request.args.get("limit", default=None)
             offset = request.args.get("offset", default=None)
-            print(f"limit: {limit}, offset: {offset}")
             result = opendata.list_opendata_dids(limit=limit, offset=offset, state="PUBLIC")
-            result = render_json(result)
+            result = render_json(**result)
             return Response(result, content_type="application/json")
         except ValueError as error:
             return generate_http_error_flask(400, error)
