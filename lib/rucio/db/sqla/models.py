@@ -487,7 +487,13 @@ class OpenDataDid(BASE, ModelBase):
                                                                    create_constraint=True,
                                                                    values_callable=lambda obj: [e.value for e in obj]),
                                                               default=OpenDataDIDState.DRAFT)
-    opendata_json = mapped_column(JSON(), default=lambda: {}, nullable=False)
+    opendata_json = mapped_column(JSON(),
+                                  nullable=False,
+                                  # default=lambda: {},
+                                  # This default does not work for all DB (e.g. Oracle, MySQL).
+                                  # Instead, we set the default in the application code
+                                  # TODO: Handle this in the database model instead (uncomment the line above and make it work)
+                                  )
 
     __table_args__ = (
         PrimaryKeyConstraint('scope', 'name', name='OPENDATA_DID_PK'),
