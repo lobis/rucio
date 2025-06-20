@@ -41,7 +41,7 @@ class TestOpenDataCore:
     @pytest.fixture(autouse=True)
     def skip_checks(self):
         skip_without_json()
-        skip_unsupported_db()
+        # skip_unsupported_db()
 
     def test_opendata_dids_add(self, mock_scope, root_account):
         dids = [
