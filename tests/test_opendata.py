@@ -34,7 +34,7 @@ def skip_unsupported_db():
     session = get_session()
     dialect = session.bind.dialect.name
     if dialect in unsupported_databases:
-        pytest.skip("Open Data is not supported on Oracle databases")
+        pytest.skip(f"Open Data is not supported on {dialect} database yet")
 
 
 class TestOpenDataCore:
