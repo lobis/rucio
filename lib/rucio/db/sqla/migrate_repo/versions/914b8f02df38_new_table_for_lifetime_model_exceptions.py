@@ -49,8 +49,8 @@ def upgrade():
                                                 name='LIFETIME_EXCEPT_STATE_CHK',
                                                 create_constraint=True,
                                                 values_callable=lambda obj: [e.value for e in obj])),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow),
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)),
                      sa.Column('expires_at', sa.DateTime))
 
         create_primary_key('LIFETIME_EXCEPT_PK', 'lifetime_except', ['id', 'scope', 'name', 'did_type', 'account'])

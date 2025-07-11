@@ -44,8 +44,8 @@ def upgrade():
                      sa.Column('md5', String(32)),
                      sa.Column('guid', GUID()),
                      sa.Column('length', sa.BigInteger),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column("updated_at", sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column("updated_at", sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
 
         create_table('archive_contents_history',
                      sa.Column('child_scope', String(25)),
@@ -57,8 +57,8 @@ def upgrade():
                      sa.Column('md5', String(32)),
                      sa.Column('guid', GUID()),
                      sa.Column('length', sa.BigInteger),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column("updated_at", sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column("updated_at", sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
 
         create_primary_key('ARCH_CONTENTS_PK',
                            'archive_contents',

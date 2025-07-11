@@ -37,8 +37,8 @@ def upgrade():
                      sa.Column('rse_expression', sa.String(3000)),
                      sa.Column('bytes', sa.BigInteger()),
                      sa.Column('account', sa.String(25)),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
         create_primary_key('ACCOUNT_GLOB_LIMITS_PK', table_name, ['account', 'rse_expression'])
         create_check_constraint('ACCOUNT_GLOB_LIMITS_CREATED_NN', table_name, 'created_at is not null')
         create_check_constraint('ACCOUNT_GLOB_LIMITS_UPDATED_NN', table_name, 'updated_at is not null')

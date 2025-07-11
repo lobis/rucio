@@ -47,8 +47,8 @@ def upgrade():
                                                    create_constraint=True,
                                                    values_callable=lambda obj: [e.value for e in obj])),
                      sa.Column('rse_id', GUID()),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
 
         create_primary_key('UPDATED_COL_REP_PK', 'updated_col_rep', ['id'])
         create_check_constraint('UPDATED_COL_REP_SCOPE_NN', 'updated_col_rep', 'scope IS NOT NULL')

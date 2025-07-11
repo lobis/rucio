@@ -47,8 +47,8 @@ def upgrade():
                      sa.Column('reason', sa.String(255)),
                      sa.Column('account', sa.String(25)),
                      sa.Column('expires_at', sa.DateTime),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
 
         create_primary_key('BAD_PFNS_PK', 'bad_pfns', ['path', 'state'])
         create_foreign_key('BAD_PFNS_ACCOUNT_FK', 'bad_pfns', 'accounts', ['account'], ['account'])
@@ -79,8 +79,8 @@ def upgrade():
                      sa.Column('reason', sa.String(255)),
                      sa.Column('account', sa.String(25)),
                      sa.Column('expires_at', sa.DateTime),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
 
         create_primary_key('BAD_PFNS_PK', 'bad_pfns', ['path', 'state'])
         create_foreign_key('BAD_PFNS_ACCOUNT_FK', 'bad_pfns', 'accounts', ['account'], ['account'])
