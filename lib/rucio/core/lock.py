@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional, Union
 
 from sqlalchemy.exc import DatabaseError
@@ -538,7 +538,7 @@ def touch_dataset_locks(dataset_locks: "Iterable[dict[str, Any]]", *, session: "
     :returns: True, if successful, False otherwise.
     """
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     for dataset_lock in dataset_locks:
         eol_at = define_eol(dataset_lock['scope'], dataset_lock['name'], rses=[{'id': dataset_lock['rse_id']}], session=session)
         try:

@@ -117,7 +117,7 @@ def delete_quarantined_replicas(rse_id: str, replicas: "Iterable[dict[str, Any]]
         values = [{'rse_id': rse_id, 'path': replica['path'],
                    'bytes': replica.get('bytes'),
                    'created_at': replica.get('created_at'),
-                   'deleted_at': datetime.datetime.utcnow()}
+                   'deleted_at': datetime.datetime.now(datetime.timezone.utc)}
                   for replica in replicas]
         stmt = insert(
             models.QuarantinedReplicaHistory

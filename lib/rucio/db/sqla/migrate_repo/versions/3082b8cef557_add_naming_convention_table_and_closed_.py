@@ -44,8 +44,8 @@ def upgrade():
                                                           name='CVT_TYPE_CHK',
                                                           create_constraint=True,
                                                           values_callable=lambda obj: [e.value for e in obj])),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
         create_primary_key('NAMING_CONVENTIONS_PK', 'naming_conventions', ['scope'])
         create_foreign_key('NAMING_CONVENTIONS_SCOPE_FK', 'naming_conventions',
                            'scopes', ['scope'], ['scope'])

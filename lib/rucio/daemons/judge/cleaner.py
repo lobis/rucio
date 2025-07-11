@@ -20,7 +20,7 @@ import logging
 import threading
 import time
 from copy import deepcopy
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from random import randint
 from re import match
 from typing import TYPE_CHECKING, Optional
@@ -78,7 +78,7 @@ def run_once(
     # Refresh paused rules
     iter_paused_rules = deepcopy(paused_rules)
     for key in iter_paused_rules:
-        if datetime.utcnow() > paused_rules[key]:
+        if datetime.now(timezone.utc) > paused_rules[key]:
             del paused_rules[key]
 
     rules = get_expired_rules(total_workers=total_workers,
@@ -104,7 +104,7 @@ def run_once(
             logger(logging.DEBUG, 'deletion of %s took %f' % (rule_id, time.time() - start))
         except (DatabaseException, DatabaseError, UnsupportedOperation) as e:
             if match(ORACLE_RESOURCE_BUSY_REGEX, str(e.args[0])) or match(PSQL_PSYCOPG_LOCK_NOT_AVAILABLE_REGEX, str(e.args[0])) or match(MYSQL_LOCK_NOWAIT_REGEX, str(e.args[0])):
-                paused_rules[rule_id] = datetime.utcnow() + timedelta(seconds=randint(600, 2400))  # noqa: S311
+                paused_rules[rule_id] = datetime.now(timezone.utc) + timedelta(seconds=randint(600, 2400))  # noqa: S311
                 METRICS.counter('exceptions.{exception}').labels(exception='LocksDetected').inc()
                 logger(logging.WARNING, 'Locks detected for %s' % rule_id)
             elif match('.*QueuePool.*', str(e.args[0])):
@@ -140,7 +140,7 @@ def run(
     if rucio.db.sqla.util.is_old_db():
         raise exception.DatabaseException('Database was not updated, daemon won\'t start')
 
-    client_time, db_time = datetime.utcnow(), get_db_time()
+    client_time, db_time = datetime.now(timezone.utc), get_db_time()
     max_offset = timedelta(hours=1, seconds=10)
     if type(db_time) is datetime:
         if db_time - client_time > max_offset or client_time - db_time > max_offset:

@@ -35,8 +35,8 @@ def upgrade():
                      sa.Column('account', sa.String(25)),
                      sa.Column('key', sa.String(255)),
                      sa.Column('value', sa.String(255)),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
 
         create_primary_key('ACCOUNT_ATTR_MAP_PK', 'account_attr_map', ['account', 'key'])
         create_check_constraint('ACCOUNT_ATTR_MAP_CREATED_NN', 'account_attr_map', 'created_at is not null')

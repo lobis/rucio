@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from configparser import NoSectionError
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from re import match
 from typing import TYPE_CHECKING, Any, Optional, Union
 
@@ -101,12 +101,12 @@ def add_exception(
         max_extension = config_get_int('lifetime_model', 'max_extension', session=session)
         if max_extension:
             if not expires_at:
-                expires_at = datetime.utcnow() + timedelta(days=max_extension)
+                expires_at = datetime.now(timezone.utc) + timedelta(days=max_extension)
             else:
                 if isinstance(expires_at, str):
                     expires_at = str_to_date(expires_at)
-                if expires_at and (expires_at > datetime.utcnow() + timedelta(days=max_extension)):
-                    expires_at = datetime.utcnow() + timedelta(days=max_extension)
+                if expires_at and (expires_at > datetime.now(timezone.utc) + timedelta(days=max_extension)):
+                    expires_at = datetime.now(timezone.utc) + timedelta(days=max_extension)
     except (ConfigNotFound, ValueError, NoSectionError):
         max_extension = None
 
@@ -118,7 +118,7 @@ def add_exception(
         cutoff_date = datetime.strptime(cutoff_date, '%Y-%m-%d')
     except ValueError:
         raise UnsupportedOperation('Cannot submit exception at that date.')
-    if cutoff_date < datetime.utcnow():
+    if cutoff_date < datetime.now(timezone.utc):
         raise UnsupportedOperation('Cannot submit exception at that date.')
 
     did_group = dict()
@@ -255,7 +255,7 @@ def update_exception(
         models.LifetimeException.id == exception_id
     ).values(
         state=state,
-        updated_at=datetime.utcnow()
+        updated_at=datetime.now(timezone.utc)
     )
 
     if session.execute(query).rowcount == 0:

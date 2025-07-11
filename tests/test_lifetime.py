@@ -15,7 +15,7 @@
 import json
 import os
 from configparser import NoSectionError
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -40,8 +40,8 @@ def test_lifetime_creation_core(root_account, rse_factory, mock_scope, did_facto
     """
     nb_datatype = 3
     nb_datasets = 2 * nb_datatype
-    yesterday = datetime.utcnow() - timedelta(days=1)
-    tomorrow = datetime.utcnow() + timedelta(days=1)
+    yesterday = datetime.now(timezone.utc) - timedelta(days=1)
+    tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
     rse, rse_id = rse_factory.make_posix_rse()
     datasets = [did_factory.make_dataset() for _ in range(nb_datasets)]
     metadata = [str(uuid()) for _ in range(nb_datatype)]
@@ -64,17 +64,17 @@ def test_lifetime_creation_core(root_account, rse_factory, mock_scope, did_facto
         pass
 
     with pytest.raises(UnsupportedOperation):
-        add_exception(datasets, root_account, pattern='wekhewfk', comments='This is a comment', expires_at=datetime.utcnow())
+        add_exception(datasets, root_account, pattern='wekhewfk', comments='This is a comment', expires_at=datetime.now(timezone.utc))
 
     # Test with cutoff_date wrongly defined
     core_config.set(section='lifetime_model', option='cutoff_date', value='wrong_value')
     with pytest.raises(UnsupportedOperation):
-        add_exception(datasets, root_account, pattern='wekhewfk', comments='This is a comment', expires_at=datetime.utcnow())
+        add_exception(datasets, root_account, pattern='wekhewfk', comments='This is a comment', expires_at=datetime.now(timezone.utc))
 
     # Test with cutoff_date properly defined
     tomorrow = tomorrow.strftime('%Y-%m-%d')
     core_config.set(section='lifetime_model', option='cutoff_date', value=tomorrow)
-    result = add_exception(datasets, root_account, pattern='wekhewfk', comments='This is a comment', expires_at=datetime.utcnow())
+    result = add_exception(datasets, root_account, pattern='wekhewfk', comments='This is a comment', expires_at=datetime.now(timezone.utc))
 
     # Check if the Not Existing DIDs are identified
     result_unknown = [(entry['scope'], entry['name']) for entry in result['unknown']]
@@ -108,7 +108,7 @@ def test_lifetime_truncate_expiration(root_account, rse_factory, mock_scope, did
     Test the duration of a lifetime exception is truncated if max_extension is defined
     """
     nb_datasets = 2
-    today = datetime.utcnow()
+    today = datetime.now(timezone.utc)
     yesterday = today - timedelta(days=1)
     tomorrow = today + timedelta(days=1)
     next_year = today + timedelta(days=365)
@@ -143,8 +143,8 @@ def test_lifetime_creation_client(root_account, rse_factory, mock_scope, did_fac
     """
     nb_datatype = 3
     nb_datasets = 2 * nb_datatype
-    yesterday = datetime.utcnow() - timedelta(days=1)
-    tomorrow = datetime.utcnow() + timedelta(days=1)
+    yesterday = datetime.now(timezone.utc) - timedelta(days=1)
+    tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
     rse, rse_id = rse_factory.make_posix_rse()
     datasets = [did_factory.make_dataset() for _ in range(nb_datasets)]
     metadata = [str(uuid()) for _ in range(nb_datatype)]
@@ -170,17 +170,17 @@ def test_lifetime_creation_client(root_account, rse_factory, mock_scope, did_fac
     for dataset in datasets:
         client_datasets.append({'scope': dataset['scope'].external, 'name': dataset['name'], 'did_type': 'DATASET'})
     with pytest.raises(UnsupportedOperation):
-        rucio_client.add_exception(client_datasets, account='root', pattern='wekhewfk', comments='This is a comment', expires_at=datetime.utcnow())
+        rucio_client.add_exception(client_datasets, account='root', pattern='wekhewfk', comments='This is a comment', expires_at=datetime.now(timezone.utc))
 
     # Test with cutoff_date wrongly defined
     core_config.set(section='lifetime_model', option='cutoff_date', value='wrong_value')
     with pytest.raises(UnsupportedOperation):
-        rucio_client.add_exception(client_datasets, account='root', pattern='wekhewfk', comments='This is a comment', expires_at=datetime.utcnow())
+        rucio_client.add_exception(client_datasets, account='root', pattern='wekhewfk', comments='This is a comment', expires_at=datetime.now(timezone.utc))
 
     # Test with cutoff_date properly defined
     tomorrow = tomorrow.strftime('%Y-%m-%d')
     core_config.set(section='lifetime_model', option='cutoff_date', value=tomorrow)
-    result = rucio_client.add_exception(client_datasets, account='root', pattern='wekhewfk', comments='This is a comment', expires_at=datetime.utcnow())
+    result = rucio_client.add_exception(client_datasets, account='root', pattern='wekhewfk', comments='This is a comment', expires_at=datetime.now(timezone.utc))
 
     # Check if the Not Existing DIDs are identified
     result_unknown = [(entry['scope'], entry['name']) for entry in result['unknown']]
@@ -218,8 +218,8 @@ def test_atropos(root_account, rse_factory, mock_scope, did_factory, rucio_clien
     """
     Test the behaviour of atropos
     """
-    today = datetime.utcnow()
-    check_date = datetime.utcnow() + timedelta(days=365)
+    today = datetime.now(timezone.utc)
+    check_date = datetime.now(timezone.utc) + timedelta(days=365)
     check_date = check_date.isoformat().split('T')[0]
 
     # Define a policy
@@ -230,7 +230,7 @@ def test_atropos(root_account, rse_factory, mock_scope, did_factory, rucio_clien
         json.dump(lifetime_policy, outfile)
     REGION.invalidate()
     nb_datasets = 2
-    today = datetime.utcnow()
+    today = datetime.now(timezone.utc)
     rse, rse_id = rse_factory.make_posix_rse()
     datasets = [did_factory.make_dataset() for _ in range(nb_datasets)]
     rules = list()
@@ -249,6 +249,7 @@ def test_atropos(root_account, rse_factory, mock_scope, did_factory, rucio_clien
         if cnt == 0:
             expiration_date = rule['eol_at']
             assert expiration_date is not None
+            expiration_date = expiration_date.replace(tzinfo=timezone.utc)
             assert expiration_date - today < timedelta(181)
             assert expiration_date - today > timedelta(179)
         else:

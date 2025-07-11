@@ -17,7 +17,7 @@ import logging
 import os
 import sys
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import update_wrapper
 from inspect import getfullargspec, isgeneratorfunction
 from os.path import basename
@@ -305,7 +305,7 @@ def wait_for_database(
 ) -> None:
     """ Wait for the database for a specific amount of time """
 
-    end_time = datetime.utcnow() + timedelta(seconds=timeout)
+    end_time = datetime.now(timezone.utc) + timedelta(seconds=timeout)
     while True:
         try:
             session = get_session()
@@ -317,7 +317,7 @@ def wait_for_database(
             break
         except SQLAlchemyError as e:
             logger(logging.WARNING, 'Still waiting for database: %s', e)
-            if datetime.utcnow() >= end_time:
+            if datetime.now(timezone.utc) >= end_time:
                 raise
 
         sleep(interval)

@@ -21,7 +21,7 @@ import logging
 import threading
 import time
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from random import randint
 from re import match
 from typing import TYPE_CHECKING, Optional
@@ -84,7 +84,7 @@ def run_once(
     # Refresh paused DIDs
     iter_paused_dids = copy.copy(paused_dids)
     for key in iter_paused_dids:
-        if datetime.utcnow() > paused_dids[key]:
+        if datetime.now(timezone.utc) > paused_dids[key]:
             del paused_dids[key]
 
     # Select a bunch of DIDs for re-evaluation for this worker
@@ -130,7 +130,7 @@ def run_once(
             delete_updated_did(id_=did.id)
         except (DatabaseException, DatabaseError) as e:
             if match(ORACLE_UNIQUE_CONSTRAINT_VIOLATED_REGEX, str(e.args[0])) or match(ORACLE_RESOURCE_BUSY_REGEX, str(e.args[0])) or match(PSQL_PSYCOPG_LOCK_NOT_AVAILABLE_REGEX, str(e.args[0])) or match(MYSQL_LOCK_NOWAIT_REGEX, str(e.args[0])):
-                paused_dids[(did.scope.internal, did.name)] = datetime.utcnow() + timedelta(seconds=randint(60, 600))  # noqa: S311
+                paused_dids[(did.scope.internal, did.name)] = datetime.now(timezone.utc) + timedelta(seconds=randint(60, 600))  # noqa: S311
                 logger(logging.WARNING, 'Locks detected for %s:%s', did.scope, did.name)
                 METRICS.counter('exceptions.{exception}').labels(exception='LocksDetected').inc()
             elif match('.*QueuePool.*', str(e.args[0])):

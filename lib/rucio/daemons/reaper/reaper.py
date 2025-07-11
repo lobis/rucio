@@ -25,7 +25,7 @@ import threading
 import time
 import traceback
 from configparser import NoOptionError, NoSectionError
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from math import log2
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -461,7 +461,7 @@ def run_once(
     if max_evaluator_backlog_count or max_evaluator_backlog_duration:
         backlog = get_evaluation_backlog()
         count_is_hit = max_evaluator_backlog_count and backlog[0] and backlog[0] > max_evaluator_backlog_count
-        duration_is_hit = max_evaluator_backlog_duration and backlog[1] and backlog[1] < datetime.utcnow() - timedelta(minutes=max_evaluator_backlog_duration)
+        duration_is_hit = max_evaluator_backlog_duration and backlog[1] and backlog[1] < datetime.now(timezone.utc) - timedelta(minutes=max_evaluator_backlog_duration)
         if count_is_hit and duration_is_hit:
             logger(logging.ERROR, 'Reaper: Judge evaluator backlog count and duration hit, stopping operation')
             return must_sleep

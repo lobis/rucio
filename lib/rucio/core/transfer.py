@@ -355,7 +355,7 @@ def mark_submitting(
             'external_id': None,
             'external_host': external_host,
             'dest_url': transfer.dest_url,
-            'submitted_at': datetime.datetime.utcnow(),
+            'submitted_at': datetime.datetime.now(datetime.timezone.utc),
         }
     )
     rowcount = session.execute(stmt).rowcount
@@ -603,11 +603,11 @@ def touch_transfer(external_host, transfer_id, *, session: "Session"):
         ).where(
             models.Request.external_id == transfer_id,
             models.Request.state == RequestState.SUBMITTED,
-            models.Request.updated_at < datetime.datetime.utcnow() - datetime.timedelta(seconds=30)
+            models.Request.updated_at < datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=30)
         ).execution_options(
             synchronize_session=False
         ).values(
-            updated_at=datetime.datetime.utcnow()
+            updated_at=datetime.datetime.now(datetime.timezone.utc)
         )
         session.execute(stmt)
     except IntegrityError as error:
@@ -1104,7 +1104,7 @@ class FailureRate(SourceRankingStrategy):
         self.source_stats = {}
 
         for stat in stats_manager.load_totals(
-            datetime.datetime.utcnow() - datetime.timedelta(hours=1),
+            datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1),
             by_activity=False
         ):
             self.source_stats.setdefault(stat['src_rse_id'], self._FailureRateStat()).incorporate_stat(stat)

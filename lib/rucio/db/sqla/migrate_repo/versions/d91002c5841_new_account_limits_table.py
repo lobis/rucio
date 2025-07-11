@@ -39,8 +39,8 @@ def upgrade():
                      sa.Column('account', sa.String(25)),
                      sa.Column('rse_id', GUID()),
                      sa.Column('bytes', sa.BigInteger),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
 
         create_primary_key('ACCOUNT_LIMITS_PK', 'account_limits', ['account', 'rse_id'])
         create_check_constraint('ACCOUNT_LIMITS_CREATED_NN', 'account_limits', 'created_at is not null')
@@ -55,8 +55,8 @@ def upgrade():
                      sa.Column('account', sa.String(25)),
                      sa.Column('rse_id', GUID()),
                      sa.Column('bytes', sa.BigInteger),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
 
         create_primary_key('ACCOUNT_LIMITS_PK', 'account_limits', ['account', 'rse_id'])
         create_check_constraint('ACCOUNT_LIMITS_CREATED_NN', 'account_limits', 'created_at is not null')
@@ -78,8 +78,8 @@ def downgrade():
                      sa.Column('rse_expression', sa.String(255)),
                      sa.Column('name', sa.String(255)),
                      sa.Column('value', sa.BigInteger),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
 
         create_primary_key('ACCOUNT_LIMITS_PK', 'account_limits', ['account', 'rse_expression', 'name'])
         create_check_constraint('ACCOUNT_LIMITS_CREATED_NN', 'account_limits', 'created_at is not null')
@@ -94,8 +94,8 @@ def downgrade():
                      sa.Column('rse_expression', sa.String(255)),
                      sa.Column('name', sa.String(255)),
                      sa.Column('value', sa.BigInteger),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
 
         create_primary_key('ACCOUNT_LIMITS_PK', 'account_limits', ['account', 'rse_expression', 'name'])
         create_check_constraint('ACCOUNT_LIMITS_CREATED_NN', 'account_limits', 'created_at is not null')

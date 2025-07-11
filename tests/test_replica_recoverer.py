@@ -14,7 +14,7 @@
 # limitations under the License.
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from os import remove
 from time import sleep
 
@@ -296,7 +296,7 @@ class TestReplicaRecoverer:
                 assert (self.rse4recovery_id in replica['states']) is False
 
         # Checking if self.tmp_file2 was declared as 'BAD' on rse4suspicious
-        self.from_date = datetime.utcnow() - timedelta(days=1)
+        self.from_date = datetime.now(timezone.utc) - timedelta(days=1)
         bad_replicas_list = list_bad_replicas_status(rse_id=self.rse4suspicious_id, younger_than=self.from_date, vo=vo)
         bad_checklist = [(badf['name'], badf['rse_id'], badf['state']) for badf in bad_replicas_list]
 

@@ -14,7 +14,7 @@
 
 import os
 import string
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest import mock
 
 import pytest
@@ -40,7 +40,7 @@ def test_replica_from_hdfs_download_merges_the_file_parts_in_order(tmp_path, moc
     mock_hdfs_get.return_value = FakeHDFSGet(files)
     merged_file_path = hdfs.ReplicaFromHDFS.download(
         'FAKE_RSE',
-        datetime.utcnow(),
+        datetime.now(timezone.utc),
         cache_dir=tmp_path,
     )
 
@@ -58,7 +58,7 @@ def test_replica_from_hdfs_download_reads_files_bigger_than_buffer_size(tmp_path
     mock_hdfs_get.return_value = FakeHDFSGet(files)
     merged_file_path = hdfs.ReplicaFromHDFS.download(
         'FAKE_RSE',
-        datetime.utcnow(),
+        datetime.now(timezone.utc),
         cache_dir=tmp_path,
         buffer_size=2,
     )

@@ -86,7 +86,7 @@ def add_subscription(name: str,
     if retroactive:
         state = SubscriptionState.NEW
     if lifetime:
-        date_lifetime = datetime.datetime.utcnow() + datetime.timedelta(days=lifetime)
+        date_lifetime = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=lifetime)
     else:
         date_lifetime = None
     new_subscription = models.Subscription(name=name,
@@ -108,8 +108,8 @@ def add_subscription(name: str,
                                                           retroactive=new_subscription.retroactive,
                                                           policyid=new_subscription.policyid,
                                                           comments=new_subscription.comments,
-                                                          created_at=datetime.datetime.utcnow(),
-                                                          updated_at=datetime.datetime.utcnow())
+                                                          created_at=datetime.datetime.now(datetime.timezone.utc),
+                                                          updated_at=datetime.datetime.now(datetime.timezone.utc))
     try:
         new_subscription.save(session=session)
         if keep_history:
@@ -155,7 +155,7 @@ def update_subscription(name: str,
     if 'replication_rules' in metadata and metadata['replication_rules']:
         values['replication_rules'] = dumps(metadata['replication_rules'])
     if 'lifetime' in metadata and metadata['lifetime']:
-        values['lifetime'] = datetime.datetime.utcnow() + datetime.timedelta(days=float(metadata['lifetime']))
+        values['lifetime'] = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=float(metadata['lifetime']))
     if 'retroactive' in metadata and metadata['retroactive']:
         values['retroactive'] = metadata['retroactive']
     if 'dry_run' in metadata and metadata['dry_run']:
@@ -168,7 +168,7 @@ def update_subscription(name: str,
         values['last_processed'] = metadata['last_processed']
     if 'state' in metadata and metadata['state'] == SubscriptionState.INACTIVE:
         values['state'] = SubscriptionState.INACTIVE
-        values['expired_at'] = datetime.datetime.utcnow()
+        values['expired_at'] = datetime.datetime.now(datetime.timezone.utc)
 
     try:
         stmt = select(
@@ -201,7 +201,7 @@ def update_subscription(name: str,
                                                               comments=subscription.comments,
                                                               last_processed=subscription.last_processed,
                                                               expired_at=subscription.expired_at,
-                                                              updated_at=datetime.datetime.utcnow(),
+                                                              updated_at=datetime.datetime.now(datetime.timezone.utc),
                                                               created_at=subscription.created_at)
             subscription_history.save(session=session)
     except NoResultFound:

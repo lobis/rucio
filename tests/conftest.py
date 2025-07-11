@@ -528,8 +528,8 @@ def __create_in_memory_db_table(
     mapper_registry = registry()
     InMemoryBase = mapper_registry.generate_base(name='InMemoryBase{}'.format(name))  # noqa: N806
     table_args = tuple(columns) + tuple(kwargs.get('table_args', ())) + (
-        Column("created_at", DateTime, default=datetime.datetime.utcnow),
-        Column("updated_at", DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow),
+        Column("created_at", DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+        Column("updated_at", DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)),
         CheckConstraint('CREATED_AT IS NOT NULL', name=name.upper() + '_CREATED_NN'),
         CheckConstraint('UPDATED_AT IS NOT NULL', name=name.upper() + '_UPDATED_NN'),
     )

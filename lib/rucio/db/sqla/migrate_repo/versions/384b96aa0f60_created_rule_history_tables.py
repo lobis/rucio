@@ -72,8 +72,8 @@ def upgrade():
                      sa.Column('purge_replicas', sa.Boolean()),
                      sa.Column('ignore_availability', sa.Boolean()),
                      sa.Column('ignore_account_limit', sa.Boolean()),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
         create_table('rules_history',
                      sa.Column('history_id', GUID()),
                      sa.Column('id', GUID()),
@@ -112,8 +112,8 @@ def upgrade():
                      sa.Column('purge_replicas', sa.Boolean()),
                      sa.Column('ignore_availability', sa.Boolean()),
                      sa.Column('ignore_account_limit', sa.Boolean()),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
         create_primary_key('RULES_HIST_RECENT_PK', 'rules_hist_recent', ['history_id'])
         create_index('RULES_HIST_RECENT_ID_IDX', 'rules_hist_recent', ["id"])
 

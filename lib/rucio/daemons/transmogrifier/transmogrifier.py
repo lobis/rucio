@@ -17,7 +17,7 @@ import logging
 import re
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from json import dumps, loads
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -707,7 +707,7 @@ def run_once(heartbeat_handler: "HeartbeatHandler", bulk: int, **_kwargs) -> boo
         update_subscription(
             name=sub["name"],
             account=sub["account"],
-            metadata={"last_processed": datetime.utcnow()},
+            metadata={"last_processed": datetime.now(timezone.utc)},
         )
     logger(
         logging.INFO,

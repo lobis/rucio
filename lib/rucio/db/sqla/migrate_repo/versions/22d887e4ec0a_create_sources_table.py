@@ -42,8 +42,8 @@ def upgrade():
                      sa.Column('url', sa.String(2048)),
                      sa.Column('ranking', sa.Integer),
                      sa.Column('bytes', sa.BigInteger),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
 
         create_primary_key('SOURCES_PK', 'sources', ['request_id', 'rse_id', 'scope', 'name'])
         create_foreign_key('SOURCES_REQ_ID_FK', 'sources', 'requests', ['request_id'], ['id'])

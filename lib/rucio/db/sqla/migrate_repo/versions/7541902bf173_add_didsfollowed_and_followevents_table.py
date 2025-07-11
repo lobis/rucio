@@ -41,8 +41,8 @@ def upgrade():
                                                    name='DIDS_FOLLOWED_TYPE_CHK',
                                                    create_constraint=True,
                                                    values_callable=lambda obj: [e.value for e in obj])),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow))
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)))
 
         create_primary_key('DIDS_FOLLOWED_PK', 'dids_followed', ['scope', 'name', 'account'])
         create_check_constraint('DIDS_FOLLOWED_SCOPE_NN', 'dids_followed', 'scope is not null')
@@ -66,8 +66,8 @@ def upgrade():
                                                    values_callable=lambda obj: [e.value for e in obj])),
                      sa.Column('event_type', sa.String(1024)),
                      sa.Column('payload', sa.Text),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow))
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)))
 
         create_primary_key('DIDS_FOLLOWED_EVENTS_PK', 'dids_followed_events', ['scope', 'name', 'account'])
         create_check_constraint('DIDS_FOLLOWED_EVENTS_SCOPE_NN', 'dids_followed_events', 'scope is not null')

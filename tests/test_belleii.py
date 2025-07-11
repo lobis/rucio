@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 from belleii_rucio_policy_package.schema import validate_schema
@@ -66,7 +66,7 @@ def test_dirac_addfile(rse_factory, did_factory, root_account, did_client, dirac
         rules = [rule for rule in did_client.list_did_rules(scope, name)]
         assert len(rules) == 1
         assert rules[0]['rse_expression'] == rse1
-        assert (rules[0]['expires_at'] - datetime.utcnow()).seconds < 86400
+        assert (rules[0]['expires_at'] - datetime.now(timezone.utc)).seconds < 86400
 
     # Create replicas on rse1 using addfile in user scope (30 days lifetime)
     lfns = [{'lfn': did_name_generator('file', name_prefix='user'), 'rse': rse1, 'bytes': 1, 'adler32': '0cc737eb', 'guid': generate_uuid()} for _ in range(nbfiles)]
@@ -82,7 +82,7 @@ def test_dirac_addfile(rse_factory, did_factory, root_account, did_client, dirac
         rules = [rule for rule in did_client.list_did_rules(scope, name)]
         assert len(rules) == 1
         assert rules[0]['rse_expression'] == 'ANY=true'
-        assert (rules[0]['expires_at'] - datetime.utcnow()).days == 30
+        assert (rules[0]['expires_at'] - datetime.now(timezone.utc)).days == 30
 
 
 @skip_non_belleii

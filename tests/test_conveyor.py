@@ -14,7 +14,7 @@
 import logging
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -818,7 +818,7 @@ def test_preparer_throttler_submitter(rse_factory, did_factory, root_account, fi
         with db_session(DatabaseOperationType.WRITE) as session:
             session.execute(stmt)
 
-    __set_process_timestamp([request['id'] for request in [request3, request4]], datetime.utcnow() - timedelta(days=2))
+    __set_process_timestamp([request['id'] for request in [request3, request4]], datetime.now(timezone.utc) - timedelta(days=2))
 
     # Run throttler: one request reset to PREPARING state and Null source_rse_id, and one request QUEUED
     throttler(once=True, partition_wait_time=0)
@@ -897,7 +897,7 @@ def test_stager(rse_factory, did_factory, root_account, replica_client):
                                            'request_type': RequestType.STAGEIN,
                                            'retry_count': 0,
                                            'account': root_account,
-                                           'requested_at': datetime.utcnow()}])
+                                           'requested_at': datetime.now(timezone.utc)}])
     stager(once=True, rses=[{'id': rse_id} for rse_id in all_rses])
 
     replica = __wait_for_replica_transfer(dst_rse_id=dst_rse_id, max_wait_seconds=2 * MAX_POLL_WAIT_SECONDS, **did)
@@ -1059,7 +1059,7 @@ def test_lost_transfers(rse_factory, did_factory, root_account):
 
     # Set update time far in the past to bypass protections (not resubmitting too fast).
     # Run finisher and submitter, the request must be resubmitted and transferred correctly
-    __update_request(request['id'], updated_at=datetime.utcnow() - timedelta(days=1))
+    __update_request(request['id'], updated_at=datetime.now(timezone.utc) - timedelta(days=1))
     finisher(once=True, partition_wait_time=0)
     # The source ranking must not be updated for submission failures and lost transfers
     request = request_core.get_request_by_did(rse_id=dst_rse_id, **did)
@@ -1462,7 +1462,7 @@ def test_two_multihops_same_intermediate_rse(rse_factory, did_factory, root_acco
     #                             +------>| RSE6 +--->| RSE7 |
     #                                     |      |    |      |
     #                                     +------+    +------+
-    start_time = datetime.utcnow()
+    start_time = datetime.now(timezone.utc)
     _, _, reaper_cache_region = caches_mock
     rse1, rse1_id = rse_factory.make_rse(scheme='mock', protocol_impl='rucio.rse.protocols.posix.Default')
     rse2, rse2_id = rse_factory.make_rse(scheme='mock', protocol_impl='rucio.rse.protocols.posix.Default')

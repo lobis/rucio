@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import and_, func, or_, select
@@ -55,7 +55,7 @@ def __add_test_rse_and_replicas(vo, scope, rse_name, names, file_size, epoch_tom
     rse_id = rse_core.add_rse(rse_name, vo=vo)
 
     rse_core.add_protocol(rse_id=rse_id, parameter=__mock_protocol)
-    tombstone = datetime.utcnow() - timedelta(days=1)
+    tombstone = datetime.now(timezone.utc) - timedelta(days=1)
     if epoch_tombstone:
         tombstone = datetime(year=1970, month=1, day=1)
 
@@ -260,10 +260,10 @@ def test_archive_removal_impact_on_constituents(rse_factory, did_factory, mock_s
     replica_core.add_replica(rse_id=rse_id, account=account, bytes_=constituent_size, **c_with_replica)
 
     replica_core.add_replica(rse_id=rse_id, account=account, bytes_=constituent_size,
-                             tombstone=datetime.utcnow() - timedelta(days=1), **c_with_expired_replica)
+                             tombstone=datetime.now(timezone.utc) - timedelta(days=1), **c_with_expired_replica)
 
     replica_core.add_replica(rse_id=rse_id, account=account, bytes_=constituent_size,
-                             tombstone=datetime.utcnow() - timedelta(days=1), **c_with_replica_and_rule)
+                             tombstone=datetime.now(timezone.utc) - timedelta(days=1), **c_with_replica_and_rule)
     rule_core.add_rule(dids=[c_with_replica_and_rule], account=account, copies=1, rse_expression=rse_name, grouping='NONE',
                        weight=None, lifetime=None, locked=False, subscription_id=None)
 
@@ -323,7 +323,7 @@ def test_archive_removal_impact_on_constituents(rse_factory, did_factory, mock_s
     # Expire the first archive and run reaper again
     # the archive will be removed; and c_first_archive_only must be removed from datasets
     # and from the DID table.
-    replica_core.set_tombstone(rse_id=rse_id, tombstone=datetime.utcnow() - timedelta(days=1), **archive1)
+    replica_core.set_tombstone(rse_id=rse_id, tombstone=datetime.now(timezone.utc) - timedelta(days=1), **archive1)
     cache_region.invalidate()
     rse_core.set_rse_limits(rse_id=rse_id, name='MinFreeSpace', value=2 * archive_size + nb_c_outside_archive * constituent_size)
     rse_core.set_rse_usage(rse_id=rse_id, source='storage', used=2 * archive_size + nb_c_outside_archive * constituent_size, free=1)
@@ -344,7 +344,7 @@ def test_archive_removal_impact_on_constituents(rse_factory, did_factory, mock_s
     # and it exists only inside the archive now.
     # If not open, Dataset2 will be removed because it will be empty.
     did_core.set_status(open=False, **dataset2)
-    replica_core.set_tombstone(rse_id=rse_id, tombstone=datetime.utcnow() - timedelta(days=1), **archive2)
+    replica_core.set_tombstone(rse_id=rse_id, tombstone=datetime.now(timezone.utc) - timedelta(days=1), **archive2)
     cache_region.invalidate()
     rse_core.set_rse_limits(rse_id=rse_id, name='MinFreeSpace', value=archive_size + nb_c_outside_archive * constituent_size)
     rse_core.set_rse_usage(rse_id=rse_id, source='storage', used=archive_size + nb_c_outside_archive * constituent_size, free=1)

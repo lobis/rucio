@@ -17,7 +17,7 @@ import logging
 import re
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional
 
 from dogpile.cache.api import NO_VALUE
@@ -82,13 +82,13 @@ def run_once(heartbeat_handler: HeartbeatHandler, bulk: int, **_kwargs) -> bool:
            max_evaluator_backlog_duration and \
            evaluator_backlog_duration and \
            evaluator_backlog_count > max_evaluator_backlog_count and \
-           evaluator_backlog_duration < datetime.utcnow() - timedelta(minutes=max_evaluator_backlog_duration):
+           evaluator_backlog_duration < datetime.now(timezone.utc) - timedelta(minutes=max_evaluator_backlog_duration):
             logger(logging.ERROR, 'Necromancer: Judge evaluator backlog count and duration hit, stopping operation')
             return must_sleep
         elif max_evaluator_backlog_count and evaluator_backlog_count and evaluator_backlog_count > max_evaluator_backlog_count:
             logger(logging.ERROR, 'Necromancer: Judge evaluator backlog count hit, stopping operation')
             return must_sleep
-        elif max_evaluator_backlog_duration and evaluator_backlog_duration and evaluator_backlog_duration < datetime.utcnow() - timedelta(minutes=max_evaluator_backlog_duration):
+        elif max_evaluator_backlog_duration and evaluator_backlog_duration and evaluator_backlog_duration < datetime.now(timezone.utc) - timedelta(minutes=max_evaluator_backlog_duration):
             logger(logging.ERROR, 'Necromancer: Judge evaluator backlog duration hit, stopping operation')
             return must_sleep
 

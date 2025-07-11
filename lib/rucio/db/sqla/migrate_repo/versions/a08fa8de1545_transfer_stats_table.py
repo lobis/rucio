@@ -39,8 +39,8 @@ def upgrade():
                      sa.Column('files_done', sa.BigInteger),
                      sa.Column('bytes_done', sa.BigInteger),
                      sa.Column('files_failed', sa.BigInteger),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
         create_primary_key('TRANSFER_STATS_PK', 'transfer_stats', ['id'])
         create_foreign_key('TRANSFER_STATS_DEST_RSE_FK', 'transfer_stats', 'rses', ['dest_rse_id'], ['id'])
         create_foreign_key('TRANSFER_STATS_SRC_RSE_FK', 'transfer_stats', 'rses', ['src_rse_id'], ['id'])

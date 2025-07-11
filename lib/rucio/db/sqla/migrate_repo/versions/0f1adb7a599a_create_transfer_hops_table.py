@@ -26,7 +26,6 @@ from rucio.db.sqla.types import GUID
 revision = '0f1adb7a599a'
 down_revision = '9a45bc4ea66d'
 
-
 def upgrade():
     '''
     Upgrade the database to this revision
@@ -37,8 +36,8 @@ def upgrade():
                      sa.Column('request_id', GUID()),
                      sa.Column('next_hop_request_id', GUID()),
                      sa.Column('initial_request_id', GUID()),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
 
         create_primary_key('TRANSFER_HOPS_PK', 'transfer_hops', ['request_id', 'next_hop_request_id', 'initial_request_id'])
         create_foreign_key('TRANSFER_HOPS_INIT_REQ_ID_FK', 'transfer_hops', 'requests', ['initial_request_id'], ['id'])

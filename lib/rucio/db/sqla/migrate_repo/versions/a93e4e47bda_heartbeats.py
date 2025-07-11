@@ -37,8 +37,8 @@ def upgrade():
                      sa.Column('pid', sa.Integer(), autoincrement=False),
                      sa.Column('thread_id', sa.BigInteger(), autoincrement=False),
                      sa.Column('thread_name', sa.String(64)),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
 
         create_primary_key('heartbeats_pk', 'heartbeats', ['executable', 'hostname', 'pid', 'thread_id'])
         create_index('HEARTBEATS_UPDATED_AT', 'heartbeats', ['updated_at'])

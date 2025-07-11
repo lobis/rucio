@@ -102,7 +102,7 @@ def bulk_submit_xfer(submitjob, recursive=False, logger=logging.log):
     tc = TransferClient(authorizer=authorizer)
 
     # make job_label for task a timestamp
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     job_label = now.strftime('%Y%m%d%H%M%s')
 
     # retrieve globus_task_deadline value to enforce time window to complete transfers

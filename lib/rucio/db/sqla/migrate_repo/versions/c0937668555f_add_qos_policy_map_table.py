@@ -36,8 +36,8 @@ def upgrade():
         create_table('rse_qos_map',
                      sa.Column('rse_id', GUID()),
                      sa.Column('qos_policy', sa.String(64)),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
         create_primary_key('RSE_QOS_MAP_PK', 'rse_qos_map', ['rse_id', 'qos_policy'])
         create_check_constraint('RSE_QOS_MAP_CREATED_NN', 'rse_qos_map', 'created_at is not null')
         create_check_constraint('RSE_QOS_MAP_UPDATED_NN', 'rse_qos_map', 'updated_at is not null')

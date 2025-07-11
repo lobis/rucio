@@ -39,8 +39,8 @@ def upgrade():
                      sa.Column('ranking', sa.Integer),
                      sa.Column('agis_distance', sa.Integer),
                      sa.Column('geoip_distance', sa.Integer),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
 
         create_primary_key('DISTANCES_PK', 'distances', ['src_rse_id', 'dest_rse_id'])
         create_foreign_key('DISTANCES_SRC_RSES_FK', 'distances', 'rses', ['src_rse_id'], ['id'])

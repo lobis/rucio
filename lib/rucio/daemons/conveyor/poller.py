@@ -81,7 +81,7 @@ def _fetch_requests(
         state=[RequestState.SUBMITTED],
         processed_by=heartbeat_handler.short_executable if set_last_processed_by else None,
         limit=db_bulk,
-        older_than=datetime.datetime.utcnow() - datetime.timedelta(seconds=older_than) if older_than else None,
+        older_than=datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=older_than) if older_than else None,
         total_workers=total_workers,
         worker_number=worker_number,
         mode_all=True,

@@ -35,8 +35,8 @@ def upgrade():
                      sa.Column('section', sa.String(128)),
                      sa.Column('opt', sa.String(128)),
                      sa.Column('value', sa.String(4000)),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
 
         create_primary_key('configs_pk', 'configs', ['section', 'opt'])
         create_check_constraint('configs_created_nn', 'configs', 'created_at is not null')

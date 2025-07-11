@@ -45,8 +45,8 @@ def upgrade():
                      sa.Column('strategy', sa.String(25)),
                      sa.Column('transfers', sa.BigInteger),
                      sa.Column('waitings', sa.BigInteger),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
         create_primary_key('TRANSFER_LIMITS_PK', 'transfer_limits', ['id'])
         create_index('TRANSFER_LIMITS_SELECTORS_IDX', 'transfer_limits', ['rse_expression', 'activity'])
         create_check_constraint('TRANSFER_LIMITS_RSE_EXPRESSION_NN', 'transfer_limits', 'rse_expression is not null')
@@ -56,8 +56,8 @@ def upgrade():
         create_table('rse_transfer_limits',
                      sa.Column('limit_id', GUID()),
                      sa.Column('rse_id', GUID()),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
         create_primary_key('RSE_TRANSFER_LIMITS_PK', 'rse_transfer_limits', ['limit_id', 'rse_id'])
         create_foreign_key('RSE_TRANSFER_LIMITS_RSE_ID_FK', 'rse_transfer_limits', 'rses', ['rse_id'], ['id'])
         create_foreign_key('RSE_TRANSFER_LIMITS_LIMIT_ID_FK', 'rse_transfer_limits', 'transfer_limits', ['limit_id'], ['id'])
@@ -82,8 +82,8 @@ def downgrade():
                      sa.Column('direction', sa.String(25)),
                      sa.Column('transfers', sa.BigInteger),
                      sa.Column('waitings', sa.BigInteger),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
 
         create_primary_key('RSE_TRANSFER_LIMITS_PK', 'rse_transfer_limits', ['rse_id', 'activity'])
         create_foreign_key('RSE_TRANSFER_LIMITS_RSE_ID_FK', 'rse_transfer_limits', 'rses', ['rse_id'], ['id'])

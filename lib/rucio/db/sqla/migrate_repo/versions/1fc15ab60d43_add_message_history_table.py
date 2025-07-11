@@ -35,8 +35,8 @@ def upgrade():
     if context.get_context().dialect.name in ['oracle', 'mysql', 'postgresql']:
         create_table('messages_history',
                      sa.Column('id', GUID()),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow),
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)),
                      sa.Column('event_type', sa.String(1024)),
                      sa.Column('payload', sa.String(4000)))
 

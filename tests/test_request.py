@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Union
 
 import pytest
@@ -76,7 +76,7 @@ def test_queue_requests_state(vo, file_config_mock, rse_factory, mock_scope, roo
         'scope': mock_scope,
         'rule_id': generate_uuid(),
         'retry_count': 1,
-        'requested_at': datetime.utcnow().replace(year=2015),
+        'requested_at': datetime.now(timezone.utc).replace(year=2015),
         'attributes': {
             'activity': user_activity,
             'bytes': 10,
@@ -92,7 +92,7 @@ def test_queue_requests_state(vo, file_config_mock, rse_factory, mock_scope, roo
         'scope': mock_scope,
         'rule_id': generate_uuid(),
         'retry_count': 1,
-        'requested_at': datetime.utcnow().replace(year=2015),
+        'requested_at': datetime.now(timezone.utc).replace(year=2015),
         'attributes': {
             'activity': 'unknown',
             'bytes': 10,
@@ -108,7 +108,7 @@ def test_queue_requests_state(vo, file_config_mock, rse_factory, mock_scope, roo
         'scope': mock_scope,
         'rule_id': generate_uuid(),
         'retry_count': 1,
-        'requested_at': datetime.utcnow().replace(year=2015),
+        'requested_at': datetime.now(timezone.utc).replace(year=2015),
         'attributes': {
             'activity': user_activity,
             'bytes': 10,

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import itertools
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from random import randint
 from unittest.mock import patch
 
@@ -62,7 +62,7 @@ def test_request_submitted_in_order(rse_factory, did_factory, root_account):
 
     # Forge request creation time to a random moment in the past hour
     def _forge_requests_creation_time():
-        base_time = datetime.utcnow().replace(microsecond=0, minute=0) - timedelta(hours=1)
+        base_time = datetime.now(timezone.utc).replace(microsecond=0, minute=0) - timedelta(hours=1)
         assigned_times = set()
         for request in requests:
             request_creation_time = None
@@ -217,11 +217,11 @@ def test_multihop_sources_created(rse_factory, did_factory, root_account, core_c
     assert __number_sources(jump_rse3_id, **did) == 1
 
     # Ensure the tombstone is correctly set on intermediate replicas
-    expected_tombstone = datetime.utcnow() + timedelta(seconds=rse_multihop_tombstone_delay)
+    expected_tombstone = datetime.now(timezone.utc) + timedelta(seconds=rse_multihop_tombstone_delay)
     replica = replica_core.get_replica(jump_rse1_id, **did)
     assert expected_tombstone - timedelta(minutes=5) < replica['tombstone'] < expected_tombstone + timedelta(minutes=5)
 
-    expected_tombstone = datetime.utcnow() + timedelta(seconds=default_multihop_tombstone_delay)
+    expected_tombstone = datetime.now(timezone.utc) + timedelta(seconds=default_multihop_tombstone_delay)
     replica = replica_core.get_replica(jump_rse2_id, **did)
     assert expected_tombstone - timedelta(minutes=5) < replica['tombstone'] < expected_tombstone + timedelta(minutes=5)
 
