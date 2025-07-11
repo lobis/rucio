@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from logging import getLogger
 
 import pytest
@@ -68,7 +68,7 @@ class TestUndertaker:
         for dsn in dsns1 + dsns2:
             files = [{'scope': mock_scope, 'name': did_name_generator('file'),
                       'bytes': 1, 'adler32': '0cc737eb',
-                      'tombstone': datetime.utcnow() + timedelta(weeks=2), 'meta': {'events': 10}} for _ in range(nbfiles)]
+                      'tombstone': datetime.now(timezone.utc) + timedelta(weeks=2), 'meta': {'events': 10}} for _ in range(nbfiles)]
             attach_dids(scope=mock_scope, name=dsn['name'], rse_id=rse_id, dids=files, account=root_account)
             replicas += files
 
@@ -124,7 +124,7 @@ class TestUndertaker:
         replicas = list()
         for dsn in dsns2:
             files = [{'scope': mock_scope, 'name': did_name_generator('file'), 'bytes': 1,
-                      'adler32': '0cc737eb', 'tombstone': datetime.utcnow() + timedelta(weeks=2), 'meta': {'events': 10}} for _ in range(nbfiles)]
+                      'adler32': '0cc737eb', 'tombstone': datetime.now(timezone.utc) + timedelta(weeks=2), 'meta': {'events': 10}} for _ in range(nbfiles)]
             attach_dids(scope=mock_scope, name=dsn['name'], rse_id=rse_id, dids=files, account=root_account)
             replicas += files
 

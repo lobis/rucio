@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -169,7 +169,7 @@ class TestBaseClient:
                 else:
                     self.send_code_and_message(200, {'x-rucio-auth-token': 'sometoken'}, '')
 
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         with MockServer(FailTwiceWith502) as server:
             creds = {'username': 'ddmlab', 'password': 'secret'}
             del invocations[:]
@@ -177,7 +177,7 @@ class TestBaseClient:
             del invocations[:]
             client._send_request(server.base_url)  # noqa
         # The client did back-off multiple times before succeeding: 2 * 0.25s (authentication) + 2 * 0.25s (request) = 1s
-        assert datetime.utcnow() - start_time > timedelta(seconds=0.9)
+        assert datetime.now(timezone.utc) - start_time > timedelta(seconds=0.9)
 
 
 class TestRucioClients:

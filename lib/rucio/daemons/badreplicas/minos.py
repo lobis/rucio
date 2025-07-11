@@ -17,7 +17,7 @@ import logging
 import math
 import re
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy.exc import DatabaseError
@@ -147,7 +147,7 @@ def __update_temporary_unavailable(
                 logger(logging.INFO, '%s is in unavailable state. Will be removed from the list of bad PFNs', str(rep['pfn']))
                 bulk_delete_bad_pfns(pfns=[rep['pfn']], session=None)
             # If the expiration date of the TEMPORARY_UNAVAILABLE is in the past, it is removed from the bad PFNs table
-            elif expires_at < datetime.utcnow():
+            elif expires_at < datetime.now(timezone.utc):
                 logger(logging.INFO, 'PFN %s expiration time (%s) is older than now and is not in unavailable state. Removing the PFNs from bad_pfns', str(rep['pfn']), expires_at)
                 bulk_delete_bad_pfns(pfns=[rep['pfn']], session=None)
             # Else update everything in the same transaction

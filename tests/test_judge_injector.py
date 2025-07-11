@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select
@@ -119,7 +119,7 @@ class TestJudgeEvaluator:
         rule = get_rule(rule_id)
         assert rule['state'] == RuleState.INJECT
         assert rule['updated_at'] < rule['created_at']
-        assert datetime.utcnow() + timedelta(seconds=3550) < rule['created_at'] < datetime.utcnow() + timedelta(seconds=3650)
+        assert datetime.now(timezone.utc) + timedelta(seconds=3550) < rule['created_at'] < datetime.now(timezone.utc) + timedelta(seconds=3650)
 
         # The time to create the rule has not yet arrived. The injector must skip this rule, no locks must be created
         rule_injector(once=True)
@@ -135,7 +135,7 @@ class TestJudgeEvaluator:
             )
 
             with db_session(DatabaseOperationType.WRITE) as session:
-                session.execute(stmt).scalar_one().created_at = datetime.utcnow()
+                session.execute(stmt).scalar_one().created_at = datetime.now(timezone.utc)
         __update_created_at()
 
         # The injector must create the locks now

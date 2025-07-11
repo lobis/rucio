@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from string import Template
 from typing import TYPE_CHECKING, Any, Literal, Optional, Union
 
@@ -71,8 +71,8 @@ def rebalance_rule(
     if parent_rule["expires_at"] is None:
         lifetime = None
     else:
-        lifetime = (parent_rule["expires_at"] - datetime.utcnow()).days * 24 * 3600 + (
-            parent_rule["expires_at"] - datetime.utcnow()
+        lifetime = (parent_rule["expires_at"] - datetime.now(timezone.utc)).days * 24 * 3600 + (
+            parent_rule["expires_at"] - datetime.now(timezone.utc)
         ).seconds
 
     if parent_rule["grouping"] == RuleGrouping.ALL:
@@ -303,7 +303,7 @@ def list_rebalance_rule_candidates(
         expiration_time=3600,
     )
     if min_expires_date_in_days > 0:
-        min_expires_date_in_days = datetime.utcnow() + timedelta(
+        min_expires_date_in_days = datetime.now(timezone.utc) + timedelta(
             days=min_expires_date_in_days
         )
         expiration_clause = or_(models.ReplicationRule.expires_at > min_expires_date_in_days,
@@ -319,7 +319,7 @@ def list_rebalance_rule_candidates(
         expiration_time=3600,
     )
     if min_created_days > 0:
-        min_created_days = datetime.utcnow() - timedelta(days=min_created_days)
+        min_created_days = datetime.now(timezone.utc) - timedelta(days=min_created_days)
         rule_clause.append(models.ReplicationRule.created_at < min_created_days)
 
     # Only move rules which are owned by <allowed_accounts> (coma separated accounts, e.g. panda,root,ddmadmin,jdoe)

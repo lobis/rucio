@@ -14,7 +14,7 @@
 
 import random
 import string
-from datetime import datetime
+from datetime import datetime, timezone
 from json import loads
 
 import pytest
@@ -303,7 +303,7 @@ class TestGatewayExternalRepresentation:
             'account': account_name,
             'rule_id': generate_uuid(),
             'retry_count': 1,
-            'requested_at': datetime.utcnow(),
+            'requested_at': datetime.now(timezone.utc),
             'attributes': {
                 'activity': 'Functional Test',
                 'bytes': 10,

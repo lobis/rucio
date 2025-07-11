@@ -20,7 +20,7 @@ import logging
 import threading
 import time
 from copy import deepcopy
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from random import randint
 from re import match
 from typing import TYPE_CHECKING, Optional
@@ -76,7 +76,7 @@ def run_once(
     # Refresh paused rules
     iter_paused_rules = deepcopy(paused_rules)
     for key in iter_paused_rules:
-        if datetime.utcnow() > paused_rules[key]:
+        if datetime.now(timezone.utc) > paused_rules[key]:
             del paused_rules[key]
 
     rules = get_injected_rules(total_workers=total_workers,
@@ -100,7 +100,7 @@ def run_once(
             logger(logging.DEBUG, 'injection of %s took %f' % (rule_id, time.time() - start))
         except (DatabaseException, DatabaseError) as e:
             if match(ORACLE_RESOURCE_BUSY_REGEX, str(e.args[0])) or match(PSQL_PSYCOPG_LOCK_NOT_AVAILABLE_REGEX, str(e.args[0])) or match(MYSQL_LOCK_NOWAIT_REGEX, str(e.args[0])):
-                paused_rules[rule_id] = datetime.utcnow() + timedelta(seconds=randint(60, 600))  # noqa: S311
+                paused_rules[rule_id] = datetime.now(timezone.utc) + timedelta(seconds=randint(60, 600))  # noqa: S311
                 METRICS.counter('exceptions.{exception}').labels(exception='LocksDetected').inc()
                 logger(logging.WARNING, 'Locks detected for %s' % rule_id)
             elif match('.*QueuePool.*', str(e.args[0])):
@@ -113,11 +113,11 @@ def run_once(
                 logger(logging.ERROR, 'DatabaseException', exc_info=True)
                 METRICS.counter('exceptions.{exception}').labels(exception=e.__class__.__name__).inc()
         except (RSEWriteBlocked) as e:
-            paused_rules[rule_id] = datetime.utcnow() + timedelta(seconds=randint(60, 600))  # noqa: S311
+            paused_rules[rule_id] = datetime.now(timezone.utc) + timedelta(seconds=randint(60, 600))  # noqa: S311
             logger(logging.WARNING, 'RSEWriteBlocked for rule %s' % rule_id)
             METRICS.counter('exceptions.{exception}').labels(exception=e.__class__.__name__).inc()
         except ReplicationRuleCreationTemporaryFailed as e:
-            paused_rules[rule_id] = datetime.utcnow() + timedelta(seconds=randint(60, 600))  # noqa: S311
+            paused_rules[rule_id] = datetime.now(timezone.utc) + timedelta(seconds=randint(60, 600))  # noqa: S311
             logger(logging.WARNING, 'ReplicationRuleCreationTemporaryFailed for rule %s' % rule_id)
             METRICS.counter('exceptions.{exception}').labels(exception=e.__class__.__name__).inc()
         except RuleNotFound:

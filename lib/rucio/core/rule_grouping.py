@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy import and_, func, select
@@ -921,8 +921,8 @@ def __is_retry_required(lock, activity):
     :param activity:             The activity of the rule.
     """
 
-    created_at_diff = (datetime.utcnow() - lock.created_at).days * 24 * 3600 + (datetime.utcnow() - lock.created_at).seconds
-    updated_at_diff = (datetime.utcnow() - lock.updated_at).days * 24 * 3600 + (datetime.utcnow() - lock.updated_at).seconds
+    created_at_diff = (datetime.now(timezone.utc) - lock.created_at).days * 24 * 3600 + (datetime.now(timezone.utc) - lock.created_at).seconds
+    updated_at_diff = (datetime.now(timezone.utc) - lock.updated_at).days * 24 * 3600 + (datetime.now(timezone.utc) - lock.updated_at).seconds
 
     if activity == 'Express':
         if updated_at_diff > 3600 * 2:
@@ -972,7 +972,7 @@ def __create_lock_and_replica(file, dataset, rule, rse_id, staging_area, availab
     """
 
     if rule.expires_at:
-        copy_pin_lifetime = rule.expires_at - datetime.utcnow()
+        copy_pin_lifetime = rule.expires_at - datetime.now(timezone.utc)
         copy_pin_lifetime = copy_pin_lifetime.seconds + copy_pin_lifetime.days * 24 * 3600
     else:
         copy_pin_lifetime = None
@@ -1242,7 +1242,7 @@ def __update_lock_replica_and_create_transfer(lock, replica, rule, dataset, tran
         lock.repair_cnt += 1
 
     if get_rse(rse_id=lock.rse_id, session=session)['staging_area']:
-        copy_pin_lifetime = rule.expires_at - datetime.utcnow()
+        copy_pin_lifetime = rule.expires_at - datetime.now(timezone.utc)
         copy_pin_lifetime = copy_pin_lifetime.seconds + copy_pin_lifetime.days * 24 * 3600
         transfers_to_create.append(create_transfer_dict(dest_rse_id=lock.rse_id,
                                                         scope=lock.scope,

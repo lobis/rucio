@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import and_, delete, exists, insert, or_, select, true, update
@@ -64,7 +64,7 @@ def add_volatile_replicas(rse_id: str, replicas: "Iterable[dict[str, Any]]", *, 
                                    models.RSEFileAssociation.name == replica['name'],
                                    models.RSEFileAssociation.rse_id == rse_id))
     if replica_clause:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         stmt = update(
             models.RSEFileAssociation
         ).prefix_with(
@@ -99,7 +99,7 @@ def add_volatile_replicas(rse_id: str, replicas: "Iterable[dict[str, Any]]", *, 
                 'scope': scope,
                 'name': name,
                 'lock_cnt': 0,
-                'tombstone': datetime.utcnow(),
+                'tombstone': datetime.now(timezone.utc),
                 'bytes': bytes_,
                 'md5': md5
             }

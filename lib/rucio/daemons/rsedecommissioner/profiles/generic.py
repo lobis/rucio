@@ -14,7 +14,7 @@
 
 """Generic decommissioning profiles."""
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.exc import NoResultFound
@@ -225,7 +225,7 @@ def _process_replicas_with_no_locks(
                                                ReplicaState.UNAVAILABLE,
                                                ReplicaState.BAD]
 
-        ten_minutes_ago = datetime.utcnow() - timedelta(seconds=600)
+        ten_minutes_ago = datetime.now(timezone.utc) - timedelta(seconds=600)
         deleting_stuck = (replica['state'] == ReplicaState.BEING_DELETED
                           and replica['updated_at'] < ten_minutes_ago)
 
@@ -277,13 +277,13 @@ def _process_replicas_with_no_locks(
             reap_pending = False
 
         # 3. Tombstone missing or in the future -> RIP now
-        if replica['tombstone'] is None or replica['tombstone'] >= datetime.utcnow():
+        if replica['tombstone'] is None or replica['tombstone'] >= datetime.now(timezone.utc):
             logger(logging.INFO, '(%s) Marking tombstone of replica %s:%s as UTCNOW.',
                    rse['rse'], replica['scope'], replica['name'])
 
             try:
                 set_tombstone(rse['id'], replica['scope'], replica['name'],
-                              tombstone=datetime.utcnow())
+                              tombstone=datetime.now(timezone.utc))
             except ReplicaNotFound as error:
                 logger(logging.WARNING, '(%s) %s', rse['rse'], str(error))
             else:
@@ -326,7 +326,7 @@ def _is_being_deleted(
     logger: "LoggerFunction" = logging.log
 ) -> bool:
     """Check if the rule is already set to be deleted."""
-    if rule['expires_at'] is not None and rule['expires_at'] < datetime.utcnow():
+    if rule['expires_at'] is not None and rule['expires_at'] < datetime.now(timezone.utc):
         logger(logging.DEBUG,
                '(%s) Rule %s for %s:%s is bound for deletion',
                rse['rse'], rule['id'], rule['scope'], rule['name'])

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -76,12 +76,12 @@ def test_bb8_rebalance_rule(vo, root_account, jdoe_account, rse_factory, mock_sc
 
     rule_cleaner(once=True)
 
-    assert (get_rule(rule_id)['expires_at'] <= datetime.utcnow())
+    assert (get_rule(rule_id)['expires_at'] <= datetime.now(timezone.utc))
     assert (get_rule(rule_id)['child_rule_id'] == child_rule)
 
     rule_cleaner(once=True)
 
-    assert (get_rule(rule_id)['expires_at'] <= datetime.utcnow())
+    assert (get_rule(rule_id)['expires_at'] <= datetime.now(timezone.utc))
 
     successful_transfer(scope=mock_scope, name=files[0]['name'], rse_id=rse2_id, nowait=False)
     successful_transfer(scope=mock_scope, name=files[1]['name'], rse_id=rse2_id, nowait=False)
@@ -257,7 +257,7 @@ def test_bb8_full_workflow(vo, root_account, jdoe_account, rse_factory, mock_sco
             assert (rule['child_rule_id'] is None)
         else:
             assert (rule['child_rule_id'] is not None)
-            assert (rule['expires_at'] <= datetime.utcnow() + timedelta(seconds=1))  # timedelta needed to prevent failure due to rounding effects
+            assert (rule['expires_at'] <= datetime.now(timezone.utc) + timedelta(seconds=1))  # timedelta needed to prevent failure due to rounding effects
             child_rule_id = rule['child_rule_id']
             child_rule = get_rule(child_rule_id)
             assert (child_rule['rse_expression'] == rse2)

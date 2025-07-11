@@ -14,7 +14,7 @@
 
 import logging
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from hashlib import md5
 from re import match
 from typing import TYPE_CHECKING, Any, Literal, Optional, Union
@@ -84,7 +84,7 @@ def list_expired_dids(
         'INDEX(DIDS DIDS_EXPIRED_AT_IDX)',
         'oracle'
     ).where(
-        models.DataIdentifier.expired_at < datetime.utcnow(),
+        models.DataIdentifier.expired_at < datetime.now(timezone.utc),
         not_(sub_query),
     ).order_by(
         models.DataIdentifier.expired_at
@@ -182,7 +182,7 @@ def add_dids(
                 # Lifetime
                 expired_at = None
                 if did.get('lifetime'):
-                    expired_at = datetime.utcnow() + timedelta(seconds=did['lifetime'])
+                    expired_at = datetime.now(timezone.utc) + timedelta(seconds=did['lifetime'])
 
                 # Insert new data identifier
                 new_did = models.DataIdentifier(scope=did['scope'], name=did['name'], account=did.get('account') or account,
@@ -961,7 +961,7 @@ def delete_dids(
         models.BadReplica.state == BadFilesStatus.BAD
     ).values({
         models.BadReplica.state: BadFilesStatus.DELETED,
-        models.BadReplica.updated_at: datetime.utcnow(),
+        models.BadReplica.updated_at: datetime.now(timezone.utc),
     }).execution_options(
         synchronize_session=False
     )
@@ -1270,7 +1270,7 @@ def detach_dids(
                                                              did_created_at=did.created_at,
                                                              created_at=associ_did.created_at,
                                                              updated_at=associ_did.updated_at,
-                                                             deleted_at=datetime.utcnow())
+                                                             deleted_at=datetime.now(timezone.utc))
         new_detach.save(session=session, flush=False)
 
         # Send message for AMI. To be removed in the future when they use the DETACH messages
@@ -2221,7 +2221,7 @@ def set_status(
                     and_(models.DataIdentifier.is_open == true(),
                          models.DataIdentifier.did_type != DIDType.FILE)
                 )
-                values['is_open'], values['closed_at'] = False, datetime.utcnow()
+                values['is_open'], values['closed_at'] = False, datetime.now(timezone.utc)
                 values['bytes'], values['length'], values['events'] = __resolve_bytes_length_events_did(did=__get_did(scope=scope, name=name, session=session),
                                                                                                         session=session)
                 # Update datasetlocks as well
@@ -2431,7 +2431,7 @@ def touch_dids(
     :returns: True, if successful, False otherwise.
     """
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     none_value = None
     try:
         for did in dids:
@@ -2578,7 +2578,7 @@ def resurrect(dids: "Iterable[Mapping[str, Any]]", *, session: "Session") -> Non
             ).where(
                 and_(models.DataIdentifier.scope == did['scope'],
                      models.DataIdentifier.name == did['name'],
-                     models.DataIdentifier.expired_at < datetime.utcnow())
+                     models.DataIdentifier.expired_at < datetime.now(timezone.utc))
             ).values({
                 models.DataIdentifier.expired_at: None
             }).execution_options(
@@ -2932,7 +2932,7 @@ def insert_content_history(
             updated_at=cont.updated_at,
             created_at=cont.created_at,
             did_created_at=new_did_created_at,
-            deleted_at=datetime.utcnow()
+            deleted_at=datetime.now(timezone.utc)
         ).save(session=session, flush=False)
 
 
@@ -3009,7 +3009,7 @@ def insert_deleted_dids(filter_: "ColumnExpressionArgument[bool]", *, session: "
             adler32=did.adler32,
             expired_at=did.expired_at,
             purge_replicas=did.purge_replicas,
-            deleted_at=datetime.utcnow(),
+            deleted_at=datetime.now(timezone.utc),
             events=did.events,
             guid=did.guid,
             project=did.project,

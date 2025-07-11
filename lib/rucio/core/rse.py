@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from io import StringIO
 from re import match
 from typing import TYPE_CHECKING, Any, Generic, Literal, Optional, TypeVar, Union, overload
@@ -2028,7 +2028,7 @@ def fill_rse_expired(
         'INDEX(REPLICAS REPLICAS_RSE_ID_TOMBSTONE_IDX)',
         'oracle'
     ).where(
-        and_(models.RSEFileAssociation.tombstone < datetime.utcnow(),
+        and_(models.RSEFileAssociation.tombstone < datetime.now(timezone.utc),
              models.RSEFileAssociation.lock_cnt == 0,
              models.RSEFileAssociation.rse_id == rse_id,
              models.RSEFileAssociation.state.in_((ReplicaState.AVAILABLE, ReplicaState.UNAVAILABLE, ReplicaState.BAD)))
