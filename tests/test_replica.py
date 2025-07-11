@@ -311,8 +311,8 @@ class TestReplicaCore:
         for r in [{'scope': files1[0]['scope'], 'name': files1[0]['name'], 'rse_id': rse_id, 'accessed_at': now}]:
             touch_replica(r)
 
-        assert now == get_replica_atime({'scope': files1[0]['scope'], 'name': files1[0]['name'], 'rse_id': rse_id})
-        assert now == get_did_atime(scope=mock_scope, name=files1[0]['name'])
+        assert now == get_replica_atime({'scope': files1[0]['scope'], 'name': files1[0]['name'], 'rse_id': rse_id}).astimezone(timezone.utc)
+        assert now == get_did_atime(scope=mock_scope, name=files1[0]['name']).astimezone(timezone.utc)
 
         for i in range(1, nbfiles):
             assert get_replica_atime({'scope': files1[i]['scope'], 'name': files1[i]['name'], 'rse_id': rse_id}) is None
@@ -555,6 +555,9 @@ class TestReplicaCore:
         did2 = did_factory.random_file_did()
         add_replica(rse2_id, bytes_=4, account=root_account, **did2)
         tombstone = get_replica(rse2_id, **did2)['tombstone']
+        assert tombstone is not None
+        tombstone = tombstone.astimezone(timezone.utc)
+
         expected_tombstone = datetime.now(timezone.utc) + timedelta(seconds=tombstone_delay)
         assert expected_tombstone - timedelta(minutes=5) < tombstone < expected_tombstone + timedelta(minutes=5)
 

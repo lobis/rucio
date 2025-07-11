@@ -249,6 +249,7 @@ def test_atropos(root_account, rse_factory, mock_scope, did_factory, rucio_clien
         if cnt == 0:
             expiration_date = rule['eol_at']
             assert expiration_date is not None
+            expiration_date = expiration_date.replace(tzinfo=timezone.utc)
             assert expiration_date - today < timedelta(181)
             assert expiration_date - today > timedelta(179)
         else:
