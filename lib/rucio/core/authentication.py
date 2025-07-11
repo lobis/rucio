@@ -272,7 +272,7 @@ def get_auth_token_ssh(
     query = select(
         models.Token
     ).where(
-        models.Token.expired_at >= datetime.datetime.utcnow(),
+        models.Token.expired_at >= datetime.datetime.now(datetime.timezone.utc),
         models.Token.account == account,
         models.Token.token.like('challenge-%')
     )
@@ -350,7 +350,7 @@ def get_ssh_challenge_token(
     crypto_rand = rng.randint(0, sys.maxsize)
 
     # give the client 10 seconds max to sign the challenge token
-    expiration = datetime.datetime.utcnow() + datetime.timedelta(seconds=10)
+    expiration = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=10)
     expiration_unix = expiration.strftime("%s")
 
     challenge_token = f'challenge-{crypto_rand}-{account}-{expiration_unix}'
@@ -471,10 +471,10 @@ def delete_expired_tokens(
         query = select(
             models.Token.token
         ).where(
-            models.Token.expired_at <= datetime.datetime.utcnow(),
+            models.Token.expired_at <= datetime.datetime.now(datetime.timezone.utc),
             or_(
                 models.Token.refresh_expired_at == null(),
-                models.Token.refresh_expired_at <= datetime.datetime.utcnow()
+                models.Token.refresh_expired_at <= datetime.datetime.now(datetime.timezone.utc)
             )
         ).order_by(
             models.Token.expired_at
@@ -537,7 +537,7 @@ def query_token(token: str, *, session: "Session") -> Optional["TokenValidationD
         models.Token.oidc_scope.label('authz_scope')
     ).where(
         models.Token.token == token,
-        models.Token.expired_at > datetime.datetime.utcnow()
+        models.Token.expired_at > datetime.datetime.now(datetime.timezone.utc)
     )
     result = session.execute(query).first()
     if result:
@@ -581,7 +581,7 @@ def validate_auth_token(token: str, *, session: "Session") -> "TokenValidationDi
         # save token in the cache
         TOKENREGION.set(cache_key, value)
     lifetime = value.get('lifetime', datetime.datetime(1970, 1, 1))  # type: ignore (value is narrowed to dict, but type-checker doesn't see it)
-    if lifetime < datetime.datetime.utcnow():  # check if expired
+    if lifetime < datetime.datetime.now(datetime.timezone.utc):  # check if expired
         TOKENREGION.delete(cache_key)
         raise CannotAuthenticate(f"Token found but expired since {date_to_str(lifetime)}.")
     return cast("TokenValidationDict", value)
@@ -602,7 +602,7 @@ def __delete_expired_tokens_account(account: "InternalAccount", *, session: "Ses
     select_query = select(
         models.Token.token
     ).where(
-        models.Token.expired_at < datetime.datetime.utcnow(),
+        models.Token.expired_at < datetime.datetime.now(datetime.timezone.utc),
         models.Token.account == account
     ).with_for_update(
         skip_locked=True
