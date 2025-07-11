@@ -445,9 +445,9 @@ class ExpiringObjectCache(Generic[ExpiringObjectCacheNewObject]):
         with self._lock:
             if not self._object \
                     or not self._creation_time \
-                    or datetime.datetime.utcnow() - self._creation_time > datetime.timedelta(seconds=self._ttl):
+                    or datetime.datetime.now(datetime.timezone.utc) - self._creation_time > datetime.timedelta(seconds=self._ttl):
                 self._object = self._new_obj_fnc()
-                self._creation_time = datetime.datetime.utcnow()
+                self._creation_time = datetime.datetime.now(datetime.timezone.utc)
                 logger(logging.INFO, "Refreshed topology object")
             return self._object
 
