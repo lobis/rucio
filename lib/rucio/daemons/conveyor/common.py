@@ -99,7 +99,7 @@ def pick_and_prepare_submission_path(
     requests_to_load_partially = {}
     requests_to_load_fully = {}
     for request_id, rws in requests_with_sources.items():
-        if rws.requested_source and datetime.datetime.utcnow() - datetime.timedelta(hours=6) < rws.requested_at:
+        if rws.requested_source and datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=6) < rws.requested_at:
             requests_to_load_partially[request_id] = rws
         else:
             requests_to_load_fully[request_id] = rws
@@ -364,7 +364,7 @@ def __create_missing_replicas_and_requests(
                         'request_type': rws.request_type,
                         'retry_count': rws.retry_count,
                         'account': rws.account,
-                        'requested_at': datetime.datetime.utcnow()}
+                        'requested_at': datetime.datetime.now(datetime.timezone.utc)}
         if rws.transfertool:
             req_to_queue['transfertool'] = rws.transfertool
         new_req = queue_requests(requests=[req_to_queue], session=session)
@@ -480,7 +480,7 @@ def _submit_transfers(
                 state=state_to_set,
                 external_host=transfertool_obj.external_host,
                 external_id=eid,
-                submitted_at=datetime.datetime.utcnow(),
+                submitted_at=datetime.datetime.now(datetime.timezone.utc),
                 transfertool=transfertool_obj.external_name,
                 logger=logger
             )
