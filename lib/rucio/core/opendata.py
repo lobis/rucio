@@ -65,7 +65,7 @@ def _check_opendata_did_exists(
         *,
         scope: "InternalScope",
         name: str,
-        session: Optional["Session"] = None,
+        session: "Session",
 ) -> bool:
     query = select(models.OpenDataDid).where(
         and_(
