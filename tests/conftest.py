@@ -17,8 +17,8 @@ import os
 import re
 import traceback
 from os import environ
-from random import choice
-from string import ascii_uppercase
+from random import choice, choices
+from string import ascii_letters, ascii_uppercase, digits
 from typing import TYPE_CHECKING, Any, Optional
 
 import pytest
@@ -758,3 +758,13 @@ def rse_protocol() -> "Iterator[dict[str, Any]]":
             }
         },
     }
+
+
+@pytest.fixture
+def doi_factory() -> "Callable[[], str]":
+    """Fixture that returns a function to generate random DOIs."""
+
+    def generate_doi() -> str:
+        return '10.1234/' + ''.join(choices(ascii_letters + digits, k=10))  # noqa: S311
+
+    return generate_doi
