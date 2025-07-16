@@ -27,7 +27,6 @@ from rucio.client.importclient import ImportClient
 from rucio.client.lifetimeclient import LifetimeClient
 from rucio.client.lockclient import LockClient
 from rucio.client.metaconventionsclient import MetaConventionClient
-from rucio.client.opendataclient import OpenDataClient
 from rucio.client.pingclient import PingClient
 from rucio.client.replicaclient import ReplicaClient
 from rucio.client.requestclient import RequestClient
@@ -47,7 +46,6 @@ class Client(AccountClient,
              RSEClient,
              ScopeClient,
              DIDClient,
-             OpenDataClient,
              RuleClient,
              SubscriptionClient,
              LockClient,
