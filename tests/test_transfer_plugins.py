@@ -156,19 +156,25 @@ def test_activity_missing(file_config_mock, did_factory, rse_factory, root_accou
     assert expected_scheduling_hints == generated_scheduling_hints
 
 
-class TestCollocationHints:
-    class TestCollocationPlugin(FTS3TapeMetadataPlugin):
-        def __init__(self) -> None:
-            self.register(
-                'test',
-                func=lambda x: self._test_collocation(x))
-            super().__init__('test')
+class TestCollocationPlugin(FTS3TapeMetadataPlugin):
+    def __init__(self) -> None:
+        super().__init__('test')
+        self.register(
+            'test',
+            func=lambda: self._test_collocation()
+        )
 
-        def _test_collocation(self, hints: dict[str, str]) -> dict[str, dict]:
-            return {"collocation_hints": {"0": "", "1": "", "2": "", "3": ""}}
+    @staticmethod
+    def _test_collocation() -> dict[str, dict]:
+        return {"collocation_hints": {"0": "", "1": "", "2": "", "3": ""}}
 
+
+@pytest.fixture(scope="module", autouse=True)
+def register_test_collocation_plugin():
     TestCollocationPlugin()
 
+
+class TestCollocationHints:
     @pytest.mark.parametrize("file_config_mock", [
         {
             "overrides": [
@@ -197,21 +203,12 @@ class TestCollocationHints:
         # Get the job params used for each transfer
         job_params = fts3_tool._file_from_transfer(transfer_path[0], job_params)
 
-        expected_collocation_hints = {
-            "collocation_hints": {
-                "0": "",
-                "1": "",
-                "2": "",
-                "3": "",
-            }
+        expected = {
+            "collocation_hints": {"0": "", "1": "", "2": "", "3": ""}
         }
 
         assert "archive_metadata" in job_params
-        generated_collocation_hints = job_params["archive_metadata"]["collocation_hints"]
-
-        assert (
-            expected_collocation_hints["collocation_hints"] == generated_collocation_hints
-        )
+        assert job_params["archive_metadata"]["collocation_hints"] == expected["collocation_hints"]
 
     @pytest.mark.parametrize("file_config_mock", [
         {
@@ -240,17 +237,15 @@ class TestCollocationHints:
 
         # Get the job params used for each transfer
         job_params = fts3_tool._file_from_transfer(transfer_path[0], job_params)
-        expected_hints = {
+
+        expected = {
             "scheduling_hints": {"priority": 20},
-            "collocation_hints": {"0": "", "1": "", "2": "", "3": ""},
+            "collocation_hints": {"0": "", "1": "", "2": "", "3": ""}
         }
+
         assert "archive_metadata" in job_params
-
-        generated_collocation_hints = job_params["archive_metadata"]["collocation_hints"]
-        assert expected_hints["collocation_hints"] == generated_collocation_hints
-
-        generated_scheduling_hints = job_params["archive_metadata"]["scheduling_hints"]
-        assert expected_hints["scheduling_hints"] == generated_scheduling_hints
+        assert job_params["archive_metadata"]["collocation_hints"] == expected["collocation_hints"]
+        assert job_params["archive_metadata"]["scheduling_hints"] == expected["scheduling_hints"]
 
 
 @pytest.mark.parametrize("file_config_mock", [
