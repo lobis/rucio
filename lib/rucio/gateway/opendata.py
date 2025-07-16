@@ -116,16 +116,3 @@ def update_opendata_did(
                                         meta=meta,
                                         doi=doi,
                                         session=session)
-
-
-@read_session
-def get_opendata_did_files(
-        *,
-        scope: str,
-        name: str,
-        vo: str = "def",
-        session: "Session"
-) -> dict[str, Any]:
-    internal_scope = InternalScope(scope, vo=vo)
-    result = opendata.get_opendata_did_files(scope=internal_scope, name=name, session=session)
-    return gateway_update_return_dict(result, session=session)
