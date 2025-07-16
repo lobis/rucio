@@ -26,8 +26,8 @@ from rucio.core.did import list_files
 from rucio.core.monitor import MetricManager
 from rucio.core.replica import list_replicas
 from rucio.db.sqla import models
-from rucio.db.sqla.constants import DIDType, OpenDataDIDState
-from rucio.db.sqla.session import transactional_session
+from rucio.db.sqla.constants import DatabaseOperationType, DIDType, OpenDataDIDState
+from rucio.db.sqla.session import db_session, transactional_session
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -53,6 +53,7 @@ def check_valid_opendata_did_state(state: str) -> None:
             f"Invalid state '{state}'. Valid opendata states are: {', '.join([s.name for s in OpenDataDIDState])}")
 
 
+# Don't know how to annotate this :(
 def opendata_state_str_to_enum(state: str) -> OpenDataDIDState:
     try:
         return OpenDataDIDState[state]
@@ -61,28 +62,11 @@ def opendata_state_str_to_enum(state: str) -> OpenDataDIDState:
             f"Invalid state '{state}'. Valid opendata states are: {', '.join([s.name for s in OpenDataDIDState])}")
 
 
-def _check_opendata_did_exists(
-        *,
-        scope: "InternalScope",
-        name: str,
-        session: Optional["Session"] = None,
-) -> bool:
-    query = select(models.OpenDataDid).where(
-        and_(
-            models.OpenDataDid.scope == scope,
-            models.OpenDataDid.name == name
-        )
-    )
-    result = session.execute(query).scalar()
-    return result is not None
-
-
 def list_opendata_dids(
         *,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         state: Optional[OpenDataDIDState] = None,
-        session: "Session",
 ) -> dict[str, list[dict[str, Any]]]:
     query = select(
         models.OpenDataDid.scope,
@@ -103,8 +87,9 @@ def list_opendata_dids(
     if state is not None:
         query = query.where(models.OpenDataDid.state == state)
 
-    dids = [{"scope": scope, "name": name, "state": state, "created_at": created_at, "updated_at": updated_at} for
-            scope, name, state, created_at, updated_at in session.execute(query)]
+    with db_session(DatabaseOperationType.READ) as session:
+        dids = [{"scope": scope, "name": name, "state": state, "created_at": created_at, "updated_at": updated_at} for
+                scope, name, state, created_at, updated_at in session.execute(query)]
 
     response = {
         "total": len(dids),
@@ -119,7 +104,6 @@ def get_opendata_meta(
         *,
         scope: "InternalScope",
         name: str,
-        session: "Session",
 ) -> dict:
     query = select(
         models.OpenDataMeta.meta,
@@ -130,7 +114,8 @@ def get_opendata_meta(
         )
     )
 
-    result = session.execute(query).mappings().fetchone()
+    with db_session(DatabaseOperationType.READ) as session:
+        result = session.execute(query).mappings().fetchone()
 
     if not result:
         return {}
@@ -142,7 +127,6 @@ def get_opendata_doi(
         *,
         scope: "InternalScope",
         name: str,
-        session: "Session",
 ) -> Optional[str]:
     query = select(
         models.OpenDataDOI.doi,
@@ -153,59 +137,13 @@ def get_opendata_doi(
         )
     )
 
-    result = session.execute(query).mappings().fetchone()
+    with db_session(DatabaseOperationType.READ) as session:
+        result = session.execute(query).mappings().fetchone()
 
     if not result:
         return None
     else:
         return result["doi"]
-
-
-def get_opendata_did_files(
-        *,
-        scope: "InternalScope",
-        name: str,
-        session: "Session",
-) -> list[dict[str, Any]]:
-    query = select(
-        models.OpenDataDid.scope,
-        models.OpenDataDid.name,
-    ).where(
-        and_(
-            models.OpenDataDid.scope == scope,
-            models.OpenDataDid.name == name,
-        )
-    )
-
-    result = session.execute(query).mappings().fetchone()
-
-    if not result:
-        raise exception.OpenDataDataIdentifierNotFound(f"OpenData DID {scope}:{name} not found.")
-
-    files = list_files(scope=scope, name=name)
-    result = [
-        {
-            "scope": file["scope"],
-            "name": file["name"],
-            "bytes": file["bytes"],
-            "adler32": file["adler32"],
-        }
-        for file in files
-    ]
-
-    for i, file in enumerate(result):
-        replicas = list_replicas(dids=[{"scope": file["scope"], "name": file["name"]}], session=session)
-        uris = []
-        for replica in replicas:
-            pfns = replica["pfns"]
-            for uri, data in pfns.items():
-                if data["type"] != "DISK":
-                    continue
-                uris.append(uri)
-
-        result[i]["uris"] = uris
-
-    return result
 
 
 def get_opendata_did(
@@ -216,7 +154,6 @@ def get_opendata_did(
         files: bool = True,
         meta: bool = False,
         doi: bool = True,
-        session: "Session",
 ) -> dict[str, Any]:
     query = select(
         models.OpenDataDid.scope,
@@ -234,7 +171,8 @@ def get_opendata_did(
     if state is not None:
         query = query.where(models.OpenDataDid.state == state)
 
-    result = session.execute(query).mappings().fetchone()
+    with db_session(DatabaseOperationType.READ) as session:
+        result = session.execute(query).mappings().fetchone()
 
     if not result:
         raise exception.OpenDataDataIdentifierNotFound(f"OpenData DID {scope}:{name} not found.")
@@ -242,11 +180,11 @@ def get_opendata_did(
     result = dict(result)
 
     if doi:
-        result["doi"] = get_opendata_doi(scope=scope, name=name, session=session)
+        result["doi"] = get_opendata_doi(scope=scope, name=name)
     if meta:
-        result["meta"] = get_opendata_meta(scope=scope, name=name, session=session)
+        result["meta"] = get_opendata_meta(scope=scope, name=name)
     if files:
-        opendata_files = get_opendata_did_files(scope=scope, name=name, session=session)
+        opendata_files = get_opendata_did_files(scope=scope, name=name)
         result["files"] = opendata_files
 
         bytes_sum = sum(file["bytes"] for file in opendata_files)
@@ -363,6 +301,23 @@ def delete_opendata_did(
         raise ValueError(f"Error deleting OpenData entry '{scope}:{name}'.")
 
 
+def _check_opendata_did_exists(
+        *,
+        scope: "InternalScope",
+        name: str,
+) -> bool:
+    query = select(models.OpenDataDid).where(
+        and_(
+            models.OpenDataDid.scope == scope,
+            models.OpenDataDid.name == name
+        )
+    )
+    with db_session(DatabaseOperationType.READ) as session:
+        result = session.execute(query).scalar()
+
+    return result is not None
+
+
 @transactional_session
 def update_opendata_did(
         *,
@@ -376,7 +331,7 @@ def update_opendata_did(
     if state is None and meta is None and doi is None:
         raise exception.InputValidationError(
             "Either 'state', 'meta', or 'doi' must be provided to update the OpenData DID.")
-    if not _check_opendata_did_exists(scope=scope, name=name, session=session):
+    if not _check_opendata_did_exists(scope=scope, name=name):
         raise exception.OpenDataDataIdentifierNotFound(f"OpenData DID '{scope}:{name}' not found.")
 
     if state is not None:
@@ -509,7 +464,7 @@ def update_opendata_doi(
         doi: str,
         session: "Session",
 ) -> None:
-    if not _check_opendata_did_exists(scope=scope, name=name, session=session):
+    if not _check_opendata_did_exists(scope=scope, name=name):
         raise exception.OpenDataDataIdentifierNotFound(f"OpenData DID '{scope}:{name}' not found.")
 
     if not isinstance(doi, str):
@@ -543,3 +498,50 @@ def update_opendata_doi(
 
     except DataError as error:
         raise exception.InputValidationError(f"Invalid data: {error}")
+
+
+def get_opendata_did_files(
+        *,
+        scope: "InternalScope",
+        name: str,
+) -> list[dict[str, Any]]:
+    query = select(
+        models.OpenDataDid.scope,
+        models.OpenDataDid.name,
+    ).where(
+        and_(
+            models.OpenDataDid.scope == scope,
+            models.OpenDataDid.name == name,
+        )
+    )
+
+    with db_session(DatabaseOperationType.READ) as session:
+        result = session.execute(query).mappings().fetchone()
+
+        if not result:
+            raise exception.OpenDataDataIdentifierNotFound(f"OpenData DID {scope}:{name} not found.")
+
+        files = list_files(scope=scope, name=name)
+        result = [
+            {
+                "scope": file["scope"],
+                "name": file["name"],
+                "bytes": file["bytes"],
+                "adler32": file["adler32"],
+            }
+            for file in files
+        ]
+
+        for i, file in enumerate(result):
+            replicas = list_replicas(dids=[{"scope": file["scope"], "name": file["name"]}], session=session)
+            uris = []
+            for replica in replicas:
+                pfns = replica["pfns"]
+                for uri, data in pfns.items():
+                    if data["type"] != "DISK":
+                        continue
+                    uris.append(uri)
+
+            result[i]["uris"] = uris
+
+        return result
