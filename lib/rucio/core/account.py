@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from re import match
 from traceback import format_exc
@@ -141,7 +141,7 @@ def del_account(
     except exc.NoResultFound:
         raise exception.AccountNotFound('Account with ID \'%s\' cannot be found' % account)
 
-    query_result.update({'status': AccountStatus.DELETED, 'deleted_at': datetime.utcnow()})
+    query_result.update({'status': AccountStatus.DELETED, 'deleted_at': datetime.now(timezone.utc)})
 
 
 @transactional_session
@@ -172,7 +172,7 @@ def update_account(
         if isinstance(value, str):
             value = AccountStatus[value]
         if value == AccountStatus.SUSPENDED:
-            query_result.update({'status': value, 'suspended_at': datetime.utcnow()})
+            query_result.update({'status': value, 'suspended_at': datetime.now(timezone.utc)})
         elif value == AccountStatus.ACTIVE:
             query_result.update({'status': value, 'suspended_at': None})
     else:

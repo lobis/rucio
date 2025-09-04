@@ -19,7 +19,7 @@ import secrets
 import tempfile
 import threading
 from configparser import NoOptionError, NoSectionError
-from datetime import datetime
+from datetime import datetime, timezone
 from json import load
 from os import remove, rmdir
 from typing import TYPE_CHECKING, Any, Optional
@@ -106,7 +106,7 @@ def generate_didname(
     file_name = ""
     for field in fields:
         if field == 'date':
-            field_str = str(datetime.utcnow().date())
+            field_str = str(datetime.now(timezone.utc).date())
         elif field == 'did_prefix':
             field_str = did_prefix
         elif field == "dsn":

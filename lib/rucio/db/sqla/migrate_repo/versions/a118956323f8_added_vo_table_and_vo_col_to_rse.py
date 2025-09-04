@@ -38,8 +38,8 @@ def upgrade():
                            sa.Column('vo', String(3)),
                            sa.Column('description', String(255)),
                            sa.Column('email', String(255)),
-                           sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                           sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow),
+                           sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                           sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)),
                            schema=schema)
         create_primary_key('VOS_PK', 'vos', ['vo'])
 

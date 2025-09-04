@@ -21,7 +21,7 @@ import logging
 import threading
 import traceback
 from copy import deepcopy
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from random import randint
 from re import match
 from typing import TYPE_CHECKING
@@ -76,7 +76,7 @@ def run_once(paused_dids: dict[tuple, datetime], chunk_size: int, heartbeat_hand
         # Refresh paused DIDs
         iter_paused_dids = deepcopy(paused_dids)
         for key in iter_paused_dids:
-            if datetime.utcnow() > paused_dids[key]:
+            if datetime.now(timezone.utc) > paused_dids[key]:
                 del paused_dids[key]
 
         dids = list_expired_dids(worker_number=worker_number, total_workers=total_workers, limit=10000)
@@ -99,7 +99,7 @@ def run_once(paused_dids: dict[tuple, datetime], chunk_size: int, heartbeat_hand
             except (DatabaseException, DatabaseError, UnsupportedOperation) as e:
                 if match(ORACLE_RESOURCE_BUSY_REGEX, str(e.args[0])) or match(PSQL_LOCK_NOT_AVAILABLE_REGEX, str(e.args[0])) or match(PSQL_PSYCOPG_LOCK_NOT_AVAILABLE_REGEX, str(e.args[0])) or match(MYSQL_LOCK_NOWAIT_REGEX, str(e.args[0])):
                     for did in chunk:
-                        paused_dids[(did['scope'], did['name'])] = datetime.utcnow() + timedelta(seconds=randint(600, 2400))  # noqa: S311
+                        paused_dids[(did['scope'], did['name'])] = datetime.now(timezone.utc) + timedelta(seconds=randint(600, 2400))  # noqa: S311
                     METRICS.counter('delete_dids.exceptions.{exception}').labels(exception='LocksDetected').inc()
                     logger(logging.WARNING, 'Locks detected for chunk')
                 else:

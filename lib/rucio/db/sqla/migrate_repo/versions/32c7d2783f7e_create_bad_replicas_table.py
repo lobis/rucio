@@ -40,8 +40,8 @@ def upgrade():
                      sa.Column('reason', sa.String(255)),
                      sa.Column('state', sa.String(1)),
                      sa.Column('account', sa.String(25)),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
 
         create_primary_key('BAD_REPLICAS_STATE_PK', 'bad_replicas', ['scope', 'name', 'rse_id', 'created_at'])
         create_check_constraint('BAD_REPLICAS_SCOPE_NN', 'bad_replicas', 'scope is not null')

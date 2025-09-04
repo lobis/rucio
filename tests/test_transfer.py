@@ -272,7 +272,7 @@ def test_failure_rate_with_custom_strategy(rse_factory, root_account, mock_scope
     # high failure RSE has failure rate of 0.5
     low_failure_transfer_activity_1 = models.TransferStats(
         resolution=datetime.timedelta(minutes=5).total_seconds(),
-        timestamp=datetime.datetime.utcnow() - datetime.timedelta(minutes=30),
+        timestamp=datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=30),
         dest_rse_id=high_failure_rse_id,
         src_rse_id=low_failure_rse_id,
         activity="test activity 1",
@@ -282,7 +282,7 @@ def test_failure_rate_with_custom_strategy(rse_factory, root_account, mock_scope
     )
     low_failure_transfer_activity_2 = models.TransferStats(
         resolution=datetime.timedelta(minutes=5).total_seconds(),
-        timestamp=datetime.datetime.utcnow() - datetime.timedelta(minutes=30),
+        timestamp=datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=30),
         dest_rse_id=dst_rse_id,
         src_rse_id=low_failure_rse_id,
         activity="test activity 2",
@@ -292,7 +292,7 @@ def test_failure_rate_with_custom_strategy(rse_factory, root_account, mock_scope
     )
     high_failure_transfer_activity = models.TransferStats(
         resolution=datetime.timedelta(minutes=5).total_seconds(),
-        timestamp=datetime.datetime.utcnow() - datetime.timedelta(minutes=30),
+        timestamp=datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=30),
         dest_rse_id=dst_rse_id,
         src_rse_id=high_failure_rse_id,
         activity="test activity 1",

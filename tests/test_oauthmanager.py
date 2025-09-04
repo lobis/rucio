@@ -38,7 +38,7 @@ def save_oauth_session_params(account, lifetime=10, redirect_msg=None, created_a
     session = get_session()
     user_session_state = rndstr()
     user_session_nonce = rndstr()
-    expired_at = datetime.datetime.utcnow() + datetime.timedelta(seconds=lifetime)
+    expired_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=lifetime)
     oauth_session_params = models.OAuthRequest(account=account,
                                                state=user_session_state,
                                                nonce=user_session_nonce,
@@ -52,12 +52,12 @@ def save_oauth_session_params(account, lifetime=10, redirect_msg=None, created_a
 
 def save_oidc_token(account, lifetime_access=0, lifetime_refresh=0, refresh_token=None, refresh=False, final_state=None):
     session = get_session()
-    expired_at = datetime.datetime.utcnow() + datetime.timedelta(seconds=lifetime_access)
+    expired_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=lifetime_access)
     refresh_expired_at = None
     if lifetime_refresh > 0:
-        refresh_expired_at = datetime.datetime.utcnow() + datetime.timedelta(seconds=lifetime_refresh)
+        refresh_expired_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=lifetime_refresh)
     if lifetime_refresh == 0 and refresh_token:
-        refresh_expired_at = datetime.datetime.utcnow()
+        refresh_expired_at = datetime.datetime.now(datetime.timezone.utc)
 
     new_token = models.Token(account=account,
                              token=rndstr(),
@@ -154,7 +154,7 @@ def count_expired_tokens(account):
         models.Token
     ).where(
         and_(models.Token.account == account,
-             models.Token.expired_at <= datetime.datetime.utcnow())
+             models.Token.expired_at <= datetime.datetime.now(datetime.timezone.utc))
     )
     return session.execute(stmt).scalar()
 
@@ -168,7 +168,7 @@ def count_refresh_tokens_expired_or_none(account):
     ).where(
         and_(models.Token.account == account,
              or_(models.Token.refresh_expired_at.__eq__(None),
-                 models.Token.refresh_expired_at <= datetime.datetime.utcnow()))
+                 models.Token.refresh_expired_at <= datetime.datetime.now(datetime.timezone.utc)))
     )
     return session.execute(stmt).scalar()
 

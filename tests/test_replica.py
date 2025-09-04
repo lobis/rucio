@@ -15,7 +15,7 @@
 import hashlib
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from json import dumps
 from typing import TYPE_CHECKING
 from unittest import mock
@@ -300,7 +300,7 @@ class TestReplicaCore:
         add_replicas(rse_id=rse_id, files=files1, account=root_account, ignore_availability=True)
         add_replicas(rse_id=rse_id, files=files2, account=root_account, ignore_availability=True)
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         now -= timedelta(microseconds=now.microsecond)
 
@@ -310,8 +310,8 @@ class TestReplicaCore:
         for r in [{'scope': files1[0]['scope'], 'name': files1[0]['name'], 'rse_id': rse_id, 'accessed_at': now}]:
             touch_replica(r)
 
-        assert now == get_replica_atime({'scope': files1[0]['scope'], 'name': files1[0]['name'], 'rse_id': rse_id})
-        assert now == get_did_atime(scope=mock_scope, name=files1[0]['name'])
+        assert now == get_replica_atime({'scope': files1[0]['scope'], 'name': files1[0]['name'], 'rse_id': rse_id}).astimezone(timezone.utc)
+        assert now == get_did_atime(scope=mock_scope, name=files1[0]['name']).astimezone(timezone.utc)
 
         for i in range(1, nbfiles):
             assert get_replica_atime({'scope': files1[i]['scope'], 'name': files1[i]['name'], 'rse_id': rse_id}) is None
@@ -554,7 +554,10 @@ class TestReplicaCore:
         did2 = did_factory.random_file_did()
         add_replica(rse2_id, bytes_=4, account=root_account, **did2)
         tombstone = get_replica(rse2_id, **did2)['tombstone']
-        expected_tombstone = datetime.utcnow() + timedelta(seconds=tombstone_delay)
+        assert tombstone is not None
+        tombstone = tombstone.astimezone(timezone.utc)
+
+        expected_tombstone = datetime.now(timezone.utc) + timedelta(seconds=tombstone_delay)
         assert expected_tombstone - timedelta(minutes=5) < tombstone < expected_tombstone + timedelta(minutes=5)
 
         # Adding rule removes the tombstone
@@ -569,25 +572,25 @@ class TestReplicaCore:
         dsn = 'ds_ua_test_%s' % generate_uuid()
         add_did(scope=mock_scope, name=dsn, did_type='DATASET', account=root_account)
         #
-        t0 = datetime.utcnow()
+        t0 = datetime.now(timezone.utc)
         time.sleep(2)
         lfn = '%s._%s.data' % (dsn, '0001')
         add_replica(rse_id=rse_id, scope=mock_scope, name=lfn, bytes_=12345, account=root_account)
         attach_dids(scope=mock_scope, name=dsn, dids=[{'scope': mock_scope, 'name': lfn}], account=root_account)
         time.sleep(2)
-        t1 = datetime.utcnow()
+        t1 = datetime.now(timezone.utc)
         time.sleep(2)
         lfn = '%s._%s.data' % (dsn, '0002')
         add_replica(rse_id=rse_id, scope=mock_scope, name=lfn, bytes_=12345, account=root_account)
         attach_dids(scope=mock_scope, name=dsn, dids=[{'scope': mock_scope, 'name': lfn}], account=root_account)
         time.sleep(2)
-        t2 = datetime.utcnow()
+        t2 = datetime.now(timezone.utc)
         time.sleep(2)
         lfn = '%s._%s.data' % (dsn, '0003')
         add_replica(rse_id=rse_id, scope=mock_scope, name=lfn, bytes_=12345, account=root_account)
         attach_dids(scope=mock_scope, name=dsn, dids=[{'scope': mock_scope, 'name': lfn}], account=root_account)
         time.sleep(2)
-        t3 = datetime.utcnow()
+        t3 = datetime.now(timezone.utc)
         #
         assert len(list(list_replicas([{'scope': mock_scope, 'name': dsn}], updated_after=None))) == 3
         assert len(list(list_replicas([{'scope': mock_scope, 'name': dsn}], updated_after=t0))) == 3
@@ -901,7 +904,7 @@ def test_client_add_temporary_unavailable_pfns(rse_factory, mock_scope, replica_
         list_rep.append(pfn)
 
     # Submit bad PFNs
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     reason_str = generate_uuid()
     replica_client.add_bad_pfns(pfns=list_rep, reason=str(reason_str), state='TEMPORARY_UNAVAILABLE', expires_at=(now + timedelta(seconds=10)).isoformat())
     result = get_bad_pfns(limit=10000, thread=None, total_threads=None, session=None)
@@ -998,7 +1001,7 @@ def test_client_add_temporary_pfns_input_validation_error(rse_factory, mock_scop
         replica_client.add_bad_pfns(pfns=list_rep, reason="Some weird reason", state='TEMPORARY_UNAVAILABLE', expires_at=None)
 
     with pytest.raises(InputValidationError):
-        replica_client.add_bad_pfns(pfns=list_rep, reason="Some weird reason", state='BAD', expires_at=(datetime.utcnow() + timedelta(seconds=10)).isoformat())
+        replica_client.add_bad_pfns(pfns=list_rep, reason="Some weird reason", state='BAD', expires_at=(datetime.now(timezone.utc) + timedelta(seconds=10)).isoformat())
 
 
 def test_client_set_tombstone(rse_factory, mock_scope, root_account, replica_client):

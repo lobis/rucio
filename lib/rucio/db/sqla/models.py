@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional, Union
 
 from sqlalchemy import BigInteger, Boolean, DateTime, Enum, Float, Integer, SmallInteger, String, Text, UniqueConstraint, event
@@ -230,11 +230,11 @@ class ModelBase:
 
     @declared_attr
     def created_at(cls):  # pylint: disable=no-self-argument
-        return mapped_column("created_at", DateTime, default=datetime.utcnow)
+        return mapped_column("created_at", DateTime, default=lambda: datetime.now(timezone.utc))
 
     @declared_attr
     def updated_at(cls):  # pylint: disable=no-self-argument
-        return mapped_column("updated_at", DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+        return mapped_column("updated_at", DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     def save(self, flush: bool = True, session: Optional["Session"] = None) -> None:
         """Save this object"""
@@ -313,7 +313,7 @@ class SoftModelBase(ModelBase):
     def delete(self, flush: bool = True, session: Optional["Session"] = None) -> None:
         """Delete this object"""
         self.deleted = True
-        self.deleted_at = datetime.utcnow()
+        self.deleted_at = datetime.now(timezone.utc)
         self.save(session=session)
 
 
@@ -1562,7 +1562,7 @@ class Subscription(BASE, ModelBase):
                                                           create_constraint=True,
                                                           values_callable=lambda obj: [e.value for e in obj]),
                                                      default=SubscriptionState.ACTIVE)
-    last_processed: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.utcnow())
+    last_processed: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.now(timezone.utc))
     account: Mapped[InternalAccount] = mapped_column(InternalAccountString(common_schema.get_schema_value('ACCOUNT_LENGTH')))
     lifetime: Mapped[Optional[datetime]] = mapped_column(DateTime)
     comments: Mapped[Optional[str]] = mapped_column(String(4000))
@@ -1589,7 +1589,7 @@ class SubscriptionHistory(BASE, ModelBase):
                                                           create_constraint=True,
                                                           values_callable=lambda obj: [e.value for e in obj]),
                                                      default=SubscriptionState.ACTIVE)
-    last_processed: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.utcnow())
+    last_processed: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.now(timezone.utc))
     account: Mapped[InternalAccount] = mapped_column(InternalAccountString(common_schema.get_schema_value('ACCOUNT_LENGTH')))
     lifetime: Mapped[Optional[datetime]] = mapped_column(DateTime)
     comments: Mapped[Optional[str]] = mapped_column(String(4000))
@@ -1613,7 +1613,7 @@ class Token(BASE, ModelBase):
     oidc_scope: Mapped[Optional[str]] = mapped_column(String(2048), default=None)  # scopes define the specific actions applications can be allowed to do on a user's behalf
     identity: Mapped[Optional[str]] = mapped_column(String(2048))
     audience: Mapped[Optional[str]] = mapped_column(String(315), default=None)
-    expired_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.utcnow() + timedelta(seconds=3600))  # one hour lifetime by default
+    expired_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc) + timedelta(seconds=3600))  # one hour lifetime by default
     ip: Mapped[Optional[str]] = mapped_column(String(39), nullable=True)
     _table_args = (PrimaryKeyConstraint('token', name='TOKENS_TOKEN_PK'),  # not supported for primary key constraint mysql_length=255
                    ForeignKeyConstraint(['account'], ['accounts.account'], name='TOKENS_ACCOUNT_FK'),
@@ -1631,7 +1631,7 @@ class OAuthRequest(BASE, ModelBase):
     redirect_msg: Mapped[Optional[str]] = mapped_column(String(4000))
     refresh_lifetime: Mapped[Optional[int]] = mapped_column(Integer())
     ip: Mapped[Optional[str]] = mapped_column(String(39), nullable=True)
-    expired_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.utcnow() + timedelta(seconds=600))  # 10 min lifetime by default
+    expired_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc) + timedelta(seconds=600))  # 10 min lifetime by default
     _table_args = (PrimaryKeyConstraint('state', name='OAUTH_REQUESTS_STATE_PK'),
                    CheckConstraint('EXPIRED_AT IS NOT NULL', name='OAUTH_REQUESTS_EXPIRED_AT_NN'),
                    Index('OAUTH_REQUESTS_ACC_EXP_AT_IDX', 'account', 'expired_at'),

@@ -14,7 +14,7 @@
 
 import operator
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -588,7 +588,7 @@ class TestFilterEngineReal:
             assert 1 == list(map(lambda did: did.name in (did_name1, did_name2, did_name3), dids)).count(True)  # 3
 
     def test_backwards_compatibility_created_after(self, db_session, mock_scope, root_account):
-        before = datetime.strftime(datetime.utcnow() - timedelta(seconds=1), "%Y-%m-%dT%H:%M:%S.%fZ")  # w/ -1s buffer
+        before = datetime.strftime(datetime.now(timezone.utc) - timedelta(seconds=1), "%Y-%m-%dT%H:%M:%S.%fZ")  # w/ -1s buffer
         did_name = self._create_tmp_did(mock_scope, root_account)
 
         dids = []
@@ -599,7 +599,7 @@ class TestFilterEngineReal:
 
     def test_backwards_compatibility_created_before(self, db_session, mock_scope, root_account):
         did_name = self._create_tmp_did(mock_scope, root_account)
-        after = datetime.strftime(datetime.utcnow() + timedelta(seconds=1), "%Y-%m-%dT%H:%M:%S.%fZ")  # w/ +1s buffer
+        after = datetime.strftime(datetime.now(timezone.utc) + timedelta(seconds=1), "%Y-%m-%dT%H:%M:%S.%fZ")  # w/ +1s buffer
 
         dids = []
         stmt = FilterEngine('created_before={}'.format(after), model_class=models.DataIdentifier).create_sqla_query(additional_model_attributes=[models.DataIdentifier.name])

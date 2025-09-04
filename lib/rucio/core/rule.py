@@ -16,7 +16,7 @@ import json
 import logging
 from configparser import NoOptionError, NoSectionError
 from copy import deepcopy
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from os import path
 from re import match
 from string import Template
@@ -278,7 +278,7 @@ def add_rule(
         with METRICS.timer('add_rule.create_rse_selector'):
             rseselector = RSESelector(account=account, rses=rses, weight=weight, copies=copies, ignore_account_limit=ask_approval or ignore_account_limit, session=session)
 
-        expires_at = datetime.utcnow() + timedelta(seconds=lifetime) if lifetime is not None else None
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=lifetime) if lifetime is not None else None
 
         notify_value = {'Y': RuleNotification.YES, 'C': RuleNotification.CLOSE, 'P': RuleNotification.PROGRESS}.get(notify or '', RuleNotification.NO)
 
@@ -417,7 +417,7 @@ def add_rule(
                 new_rule.state = RuleState.INJECT
                 logger(logging.DEBUG, "Created rule %s for injection", str(new_rule.id))
                 if delay_injection:
-                    new_rule.created_at = datetime.utcnow() + timedelta(seconds=delay_injection)
+                    new_rule.created_at = datetime.now(timezone.utc) + timedelta(seconds=delay_injection)
                     logger(logging.DEBUG, "Scheduled rule %s for injection on %s", str(new_rule.id), new_rule.created_at)
                 continue
 
@@ -648,7 +648,7 @@ def add_rules(
                         grouping = {'ALL': RuleGrouping.ALL, 'NONE': RuleGrouping.NONE}.get(str(rule.get('grouping')), RuleGrouping.DATASET)
 
                         rule_lifetime: Optional[int] = rule.get('lifetime')
-                        expires_at: Optional[datetime] = datetime.utcnow() + timedelta(seconds=rule_lifetime) if rule_lifetime is not None else None
+                        expires_at: Optional[datetime] = datetime.now(timezone.utc) + timedelta(seconds=rule_lifetime) if rule_lifetime is not None else None
 
                         notify = {'Y': RuleNotification.YES, 'C': RuleNotification.CLOSE, 'P': RuleNotification.PROGRESS, None: RuleNotification.NO}.get(rule.get('notify'))
 
@@ -722,7 +722,7 @@ def add_rules(
                         new_rule.state = RuleState.INJECT
                         logger(logging.DEBUG, "Created rule %s for injection", str(new_rule.id))
                         if delay_injection:
-                            new_rule.created_at = datetime.utcnow() + timedelta(seconds=delay_injection)
+                            new_rule.created_at = datetime.now(timezone.utc) + timedelta(seconds=delay_injection)
                             logger(logging.DEBUG, "Scheduled rule %s for injection on %s", (str(new_rule.id), new_rule.created_at))
                         continue
 
@@ -823,7 +823,7 @@ def inject_rule(
         raise RuleNotFound('No rule with the id %s found' % (rule_id)) from exc
 
     # Check if rule will expire in the next 5 minutes:
-    if rule.child_rule_id is None and rule.expires_at is not None and rule.expires_at < datetime.utcnow() + timedelta(seconds=300):
+    if rule.child_rule_id is None and rule.expires_at is not None and rule.expires_at < datetime.now(timezone.utc) + timedelta(seconds=300):
         logger(logging.INFO, 'Rule %s expiring soon, skipping', str(rule.id))
         return
 
@@ -843,7 +843,7 @@ def inject_rule(
         )
         dids = [did for did in dids if session.execute(stmt.where(and_(models.ReplicationRule.scope == did['scope'], models.ReplicationRule.name == did['name']))).scalar_one_or_none() is None]
         if rule.expires_at:
-            lifetime = (rule.expires_at - datetime.utcnow()).days * 24 * 3600 + (rule.expires_at - datetime.utcnow()).seconds
+            lifetime = (rule.expires_at - datetime.now(timezone.utc)).days * 24 * 3600 + (rule.expires_at - datetime.now(timezone.utc)).seconds
         else:
             lifetime = None
 
@@ -1185,9 +1185,9 @@ def delete_rule(
 
         if soft:
             if rule.expires_at:
-                rule.expires_at = min(datetime.utcnow() + timedelta(seconds=3600), rule.expires_at)
+                rule.expires_at = min(datetime.now(timezone.utc) + timedelta(seconds=3600), rule.expires_at)
             else:
-                rule.expires_at = datetime.utcnow() + timedelta(seconds=3600)
+                rule.expires_at = datetime.now(timezone.utc) + timedelta(seconds=3600)
             if rule.child_rule_id is not None and delete_parent:
                 rule.child_rule_id = None
             insert_rule_history(rule=rule, recent=True, longterm=False, session=session)
@@ -1279,12 +1279,12 @@ def repair_rule(
             nowait=True
         )
         rule = session.execute(stmt).scalar_one()
-        rule.updated_at = datetime.utcnow()
+        rule.updated_at = datetime.now(timezone.utc)
 
         # Check if rule is longer than 2 weeks in STUCK
         if rule.stuck_at is None:
-            rule.stuck_at = datetime.utcnow()
-        if rule.stuck_at < (datetime.utcnow() - timedelta(days=14)):
+            rule.stuck_at = datetime.now(timezone.utc)
+        if rule.stuck_at < (datetime.now(timezone.utc) - timedelta(days=14)):
             rule.state = RuleState.SUSPENDED
             insert_rule_history(rule=rule, recent=True, longterm=False, session=session)
             logger(logging.INFO, 'Replication rule %s has been SUSPENDED', rule_id)
@@ -1678,7 +1678,7 @@ def update_rule(
                     lifetime = get_scratch_policy(rule.account, rses, options['lifetime'], session=session)
                 except UndefinedPolicy:
                     lifetime = options['lifetime']
-                rule.expires_at = datetime.utcnow() + timedelta(seconds=lifetime) if lifetime is not None else None
+                rule.expires_at = datetime.now(timezone.utc) + timedelta(seconds=lifetime) if lifetime is not None else None
             if key == 'source_replica_expression':
                 rule.source_replica_expression = options['source_replica_expression']
 
@@ -1844,7 +1844,7 @@ def update_rule(
 
                 elif options['state'].lower() == 'stuck':
                     rule.state = RuleState.STUCK
-                    rule.stuck_at = datetime.utcnow()
+                    rule.stuck_at = datetime.now(timezone.utc)
                     if not options.get('cancel_requests', False):
                         query = update(
                             models.ReplicaLock
@@ -1982,7 +1982,7 @@ def reduce_rule(
         grouping = {RuleGrouping.ALL: 'ALL', RuleGrouping.NONE: 'NONE'}.get(rule.grouping, 'DATASET')
 
         if rule.expires_at:
-            lifetime = (rule.expires_at - datetime.utcnow()).days * 24 * 3600 + (rule.expires_at - datetime.utcnow()).seconds
+            lifetime = (rule.expires_at - datetime.now(timezone.utc)).days * 24 * 3600 + (rule.expires_at - datetime.now(timezone.utc)).seconds
         else:
             lifetime = None
 
@@ -2058,7 +2058,7 @@ def move_rule(
         grouping = {RuleGrouping.ALL: 'ALL', RuleGrouping.NONE: 'NONE'}.get(rule.grouping, 'DATASET')
 
         if rule.expires_at:
-            lifetime = (rule.expires_at - datetime.utcnow()).days * 24 * 3600 + (rule.expires_at - datetime.utcnow()).seconds
+            lifetime = (rule.expires_at - datetime.now(timezone.utc)).days * 24 * 3600 + (rule.expires_at - datetime.now(timezone.utc)).seconds
         else:
             lifetime = None
 
@@ -2275,7 +2275,7 @@ def get_expired_rules(
     ).with_hint(
         models.ReplicationRule, 'INDEX(RULES RULES_EXPIRES_AT_IDX)', 'oracle'
     ).where(
-        and_(models.ReplicationRule.expires_at < datetime.utcnow(),
+        and_(models.ReplicationRule.expires_at < datetime.now(timezone.utc),
              models.ReplicationRule.locked == false(),
              models.ReplicationRule.child_rule_id == null())
     ).order_by(
@@ -2325,7 +2325,7 @@ def get_injected_rules(
         models.ReplicationRule, 'INDEX(RULES RULES_STATE_IDX)', 'oracle'
     ).where(
         and_(models.ReplicationRule.state == RuleState.INJECT,
-             models.ReplicationRule.created_at <= datetime.utcnow())
+             models.ReplicationRule.created_at <= datetime.now(timezone.utc))
     ).order_by(
         models.ReplicationRule.created_at
     )
@@ -2374,9 +2374,9 @@ def get_stuck_rules(
         models.ReplicationRule, 'INDEX(RULES RULES_STATE_IDX)', 'oracle'
     ).where(
         and_(models.ReplicationRule.state == RuleState.STUCK,
-             models.ReplicationRule.updated_at < datetime.utcnow() - timedelta(seconds=delta),
+             models.ReplicationRule.updated_at < datetime.now(timezone.utc) - timedelta(seconds=delta),
              or_(models.ReplicationRule.expires_at == null(),
-                 models.ReplicationRule.expires_at > datetime.utcnow(),
+                 models.ReplicationRule.expires_at > datetime.now(timezone.utc),
                  models.ReplicationRule.locked == true()))
     ).order_by(
         models.ReplicationRule.updated_at
@@ -2554,7 +2554,7 @@ def update_rules_for_lost_replica(
              models.BadReplica.state == BadFilesStatus.BAD)
     ).values({
         models.BadReplica.state: BadFilesStatus.LOST,
-        models.BadReplica.updated_at: datetime.utcnow()
+        models.BadReplica.updated_at: datetime.now(timezone.utc)
     })
     session.execute(stmt)
     for dts in datasets:

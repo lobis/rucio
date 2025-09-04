@@ -26,7 +26,7 @@ import re
 import threading
 import time
 from configparser import NoOptionError, NoSectionError
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
 import rucio.db.sqla.util
@@ -440,7 +440,7 @@ def run_once(heartbeat_handler: Any, younger_than: int, nattempts: int, vos: "Op
                     pfns_list.append(replica_value['pfn'])
 
                 if active_mode:
-                    add_bad_pfns(pfns=pfns_list, account=InternalAccount('root', vo=vo), state='TEMPORARY_UNAVAILABLE', expires_at=datetime.utcnow() + timedelta(days=3))
+                    add_bad_pfns(pfns=pfns_list, account=InternalAccount('root', vo=vo), state='TEMPORARY_UNAVAILABLE', expires_at=datetime.now(timezone.utc) + timedelta(days=3))
 
                 logger(logging.INFO, "%s is problematic (more than %s suspicious replicas). Send a Jira ticket for the RSE (to be implemented).", rse_key, limit_suspicious_files_on_rse)
                 logger(logging.INFO, "The following files on %s have been marked as TEMPORARILY UNAVAILABLE:", rse_key)
@@ -594,7 +594,7 @@ def run(
     if rucio.db.sqla.util.is_old_db():
         raise DatabaseException('Database was not updated, daemon won\'t start')
 
-    client_time, db_time = datetime.utcnow(), get_db_time()
+    client_time, db_time = datetime.now(timezone.utc), get_db_time()
     max_offset = timedelta(hours=1, seconds=10)
     if isinstance(db_time, datetime):
         if db_time - client_time > max_offset or client_time - db_time > max_offset:

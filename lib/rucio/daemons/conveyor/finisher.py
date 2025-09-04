@@ -100,7 +100,7 @@ def _fetch_requests(
     reqs.extend(
         get_requests_fnc(
             state=[RequestState.SUBMITTING],
-            older_than=datetime.datetime.utcnow() - FAILED_DURING_SUBMISSION_DELAY
+            older_than=datetime.datetime.now(datetime.timezone.utc) - FAILED_DURING_SUBMISSION_DELAY
         )
     )
 
@@ -512,7 +512,7 @@ def __update_replica(
                 'bytes_': replica['bytes'],
                 'account': InternalAccount('root', vo=replica['scope'].vo),  # it will deleted immediately, do we need to get the accurate account from rule?
                 'adler32': replica['adler32'],
-                'tombstone': datetime.datetime.utcnow(),
+                'tombstone': datetime.datetime.now(datetime.timezone.utc),
             }
             try:
                 try:

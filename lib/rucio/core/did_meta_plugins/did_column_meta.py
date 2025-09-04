@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import operator
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import inspect, update
@@ -84,7 +84,7 @@ class DidColumnMeta(DidMetaPlugin):
                 try:
                     expired_at = None
                     if value is not None:
-                        expired_at = datetime.utcnow() + timedelta(seconds=float(value))
+                        expired_at = datetime.now(timezone.utc) + timedelta(seconds=float(value))
                     rowcount = did_query.update({'expired_at': expired_at}, synchronize_session='fetch')
                 except TypeError as error:
                     raise exception.InvalidValueForKey(error)

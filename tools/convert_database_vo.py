@@ -21,7 +21,7 @@ sys.path.append(base_path)
 os.chdir(base_path)
 
 import argparse  # noqa: E402
-from datetime import datetime  # noqa: E402
+from datetime import datetime, timezone  # noqa: E402
 from traceback import format_exc  # noqa: E402
 
 from sqlalchemy import func  # noqa: E402
@@ -114,7 +114,7 @@ def rename_vo(old_vo, new_vo, insert_new_vo=False, description=None, email=None,
                         'int_2': 2,
                         'new_description': description,
                         'new_email': email,
-                        'datetime': datetime.utcnow()}
+                        'datetime': datetime.now(timezone.utc)}
 
         bound_params_text = {}
         for key in bound_params:

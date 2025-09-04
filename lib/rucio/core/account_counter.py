@@ -224,7 +224,7 @@ def fill_account_counter_history_table(*, session: "Session") -> None:
         models.AccountUsage.account,
         models.AccountUsage.files,
         models.AccountUsage.bytes,
-        literal(datetime.datetime.utcnow()),
+        literal(datetime.datetime.now(datetime.timezone.utc)),
     )
 
     stmt = insert(

@@ -17,7 +17,7 @@ Hermes Test
 """
 
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from json import loads
 from unittest.mock import MagicMock
 
@@ -150,7 +150,7 @@ def test_hermes(core_config_mock, caches_mock, monkeypatch):
         message = {
             "bytes": 2,
             "rse": mock_rse,
-            "created_at": datetime.utcnow().replace(microsecond=0),
+            "created_at": datetime.now(timezone.utc).replace(microsecond=0),
         }
         add_message(event_type, message)
         add_message(
@@ -211,7 +211,7 @@ def test_hermes(core_config_mock, caches_mock, monkeypatch):
         message = {
             "bytes": file_size,
             "rse": mock_rse,
-            "created_at": datetime.utcnow().replace(microsecond=0),
+            "created_at": datetime.now(timezone.utc).replace(microsecond=0),
         }
         add_message(event_type, message)
         message["event_type"] = event_type

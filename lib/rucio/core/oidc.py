@@ -17,7 +17,7 @@ import json
 import logging
 import subprocess
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from math import floor
 from secrets import choice
 from typing import TYPE_CHECKING, Any, Final, Optional, Union
@@ -107,7 +107,7 @@ def _token_cache_get(
         METRICS.counter('token_cache.invalid').inc()
         return None
 
-    now = datetime.utcnow().timestamp()
+    now = datetime.now(timezone.utc).timestamp()
     expiration = payload.get('exp', 0)    # type: ignore
     if now + min_lifetime > expiration:
         METRICS.counter('token_cache.expired').inc()
@@ -451,7 +451,7 @@ def get_auth_oidc(account: str, *, session: "Session", **kwargs) -> str:
         if refresh_lifetime:
             refresh_lifetime = int(refresh_lifetime)
         # Specifying temporarily 5 min lifetime for the authentication session.
-        expired_at = datetime.utcnow() + timedelta(seconds=300)
+        expired_at = datetime.now(timezone.utc) + timedelta(seconds=300)
         # saving session parameters into the Rucio DB
         oauth_session_params = models.OAuthRequest(account=account,
                                                    state=state,
@@ -553,7 +553,7 @@ def get_token_oidc(
                                      % (jwt_row_dict['identity'], str(jwt_row_dict['account'])))
         METRICS.counter(name='success').inc()
         # get access token expiry timestamp
-        jwt_row_dict['lifetime'] = datetime.utcnow() + timedelta(seconds=oidc_tokens['expires_in'])
+        jwt_row_dict['lifetime'] = datetime.now(timezone.utc) + timedelta(seconds=oidc_tokens['expires_in'])
         # get audience and scope info from the token
         if 'scope' in oidc_tokens and 'audience' in oidc_tokens:
             jwt_row_dict['authz_scope'] = val_to_space_sep_str(oidc_tokens['scope'])
@@ -591,7 +591,7 @@ def get_token_oidc(
                 extra_dict['refresh_expired_at'] = datetime.utcfromtimestamp(float(exp))
             except Exception:
                 # 4 day expiry period by default
-                extra_dict['refresh_expired_at'] = datetime.utcnow() + timedelta(hours=REFRESH_LIFETIME_H)
+                extra_dict['refresh_expired_at'] = datetime.now(timezone.utc) + timedelta(hours=REFRESH_LIFETIME_H)
 
         new_token = __save_validated_token(oidc_tokens['access_token'], jwt_row_dict, extra_dict=extra_dict, session=session)
         METRICS.counter(name='IdP_authorization.access_token.saved').inc()
@@ -764,7 +764,7 @@ def get_token_for_account_operation(account: str, req_audience: str = None, req_
         ).where(
             models.Token.identity.in_(identities),
             models.Token.account == account,
-            models.Token.expired_at > datetime.utcnow()
+            models.Token.expired_at > datetime.now(timezone.utc)
         ).with_for_update(
             skip_locked=True
         )
@@ -810,7 +810,7 @@ def get_token_for_account_operation(account: str, req_audience: str = None, req_
                 models.Token
             ).where(
                 models.Token.account == account,
-                models.Token.expired_at > datetime.utcnow()
+                models.Token.expired_at > datetime.now(timezone.utc)
             )
             admin_account_tokens = session.execute(query).scalars().all()
             for admin_token in admin_account_tokens:
@@ -854,7 +854,7 @@ def get_token_for_account_operation(account: str, req_audience: str = None, req_
                 ).where(
                     models.Token.identity == admin_identity,
                     models.Token.account == admin_account,
-                    models.Token.expired_at > datetime.utcnow()
+                    models.Token.expired_at > datetime.now(timezone.utc)
                 )
                 admin_account_tokens = session.execute(query).scalars().all()
                 for admin_token in admin_account_tokens:
@@ -960,7 +960,7 @@ def __exchange_token_oidc(subject_token_object: models.Token, *, session: "Sessi
             values = __get_keyvalues_from_claims(oidc_tokens['access_token'], ['scope', 'aud'])
             jwt_row_dict['authz_scope'] = values['scope']
             jwt_row_dict['audience'] = values['aud']
-        jwt_row_dict['lifetime'] = datetime.utcnow() + timedelta(seconds=oidc_tokens['expires_in'])
+        jwt_row_dict['lifetime'] = datetime.now(timezone.utc) + timedelta(seconds=oidc_tokens['expires_in'])
         if 'refresh_token' in oidc_tokens:
             extra_dict['refresh_token'] = oidc_tokens['refresh_token']
             extra_dict['refresh'] = True
@@ -972,7 +972,7 @@ def __exchange_token_oidc(subject_token_object: models.Token, *, session: "Sessi
                 extra_dict['refresh_expired_at'] = datetime.utcfromtimestamp(float(values['exp']))
             except Exception:
                 # 4 day expiry period by default
-                extra_dict['refresh_expired_at'] = datetime.utcnow() + timedelta(hours=REFRESH_LIFETIME_H)
+                extra_dict['refresh_expired_at'] = datetime.now(timezone.utc) + timedelta(hours=REFRESH_LIFETIME_H)
 
         new_token = __save_validated_token(oidc_tokens['access_token'], jwt_row_dict, extra_dict=extra_dict, session=session)
         METRICS.counter(name='IdP_authorization.access_token.saved').inc()
@@ -1007,7 +1007,7 @@ def __change_refresh_state(token: str, refresh: bool = False, *, session: "Sessi
         else:
             query = query.values({
                 models.Token.refresh: False,
-                models.Token.refresh_expired_at: datetime.utcnow()
+                models.Token.refresh_expired_at: datetime.now(timezone.utc)
             })
         session.execute(query)
     except Exception as error:
@@ -1031,7 +1031,7 @@ def refresh_cli_auth_token(token_string: str, account: str, *, session: "Session
     ).where(
         models.Token.token == token_string,
         models.Token.account == account,
-        models.Token.expired_at > datetime.utcnow()
+        models.Token.expired_at > datetime.now(timezone.utc)
     ).with_for_update(
         skip_locked=True
     )
@@ -1052,7 +1052,7 @@ def refresh_cli_auth_token(token_string: str, account: str, *, session: "Session
     if account_token.refresh:
         # protection (!) returning the same token if the token_string
         # is a result of a refresh which happened in the last 5 min
-        datetime_min_ago = datetime.utcnow() - timedelta(seconds=300)
+        datetime_min_ago = datetime.now(timezone.utc) - timedelta(seconds=300)
         if account_token.updated_at > datetime_min_ago:
             epoch_exp = int(floor((account_token.expired_at - datetime(1970, 1, 1)).total_seconds()))
             new_token_string = account_token.token
@@ -1071,9 +1071,9 @@ def refresh_cli_auth_token(token_string: str, account: str, *, session: "Session
             models.Token
         ).where(
             models.Token.refresh == true(),
-            models.Token.refresh_expired_at > datetime.utcnow(),
+            models.Token.refresh_expired_at > datetime.now(timezone.utc),
             models.Token.account == account,
-            models.Token.expired_at > datetime.utcnow()
+            models.Token.expired_at > datetime.now(timezone.utc)
         ).with_for_update(
             skip_locked=True
         )
@@ -1109,12 +1109,12 @@ def refresh_jwt_tokens(total_workers: int, worker_number: int, refreshrate: int 
     nrefreshed = 0
     try:
         # get tokens for refresh that expire in the next <refreshrate> seconds
-        expiration_future = datetime.utcnow() + timedelta(seconds=refreshrate)
+        expiration_future = datetime.now(timezone.utc) + timedelta(seconds=refreshrate)
         query = select(
             models.Token
         ).where(
             models.Token.refresh == true(),
-            models.Token.refresh_expired_at > datetime.utcnow(),
+            models.Token.refresh_expired_at > datetime.now(timezone.utc),
             models.Token.expired_at < expiration_future
         ).order_by(
             models.Token.expired_at
@@ -1167,7 +1167,7 @@ def __refresh_token_oidc(token_object: models.Token, *, session: "Session"):
         jwt_row_dict, extra_dict = {}, {}
         jwt_row_dict['account'] = token_object.account
         jwt_row_dict['identity'] = token_object.identity
-        extra_dict['refresh_start'] = datetime.utcnow()
+        extra_dict['refresh_start'] = datetime.now(timezone.utc)
         # check if refresh token started in the past already
         if hasattr(token_object, 'refresh_start'):
             if token_object.refresh_start:
@@ -1178,7 +1178,7 @@ def __refresh_token_oidc(token_object: models.Token, *, session: "Session"):
             extra_dict['refresh_lifetime'] = token_object.refresh_lifetime
         # if the token has been refreshed for time exceeding
         # the refresh_lifetime, the attempt will be aborted and refresh stopped
-        if datetime.utcnow() - extra_dict['refresh_start'] > timedelta(hours=extra_dict['refresh_lifetime']):
+        if datetime.now(timezone.utc) - extra_dict['refresh_start'] > timedelta(hours=extra_dict['refresh_lifetime']):
             __change_refresh_state(token_object.token, refresh=False, session=session)
             return None
         oidc_dict = __get_init_oidc_client(token_object=token_object, token_type="refresh_token")  # noqa: S106
@@ -1204,7 +1204,7 @@ def __refresh_token_oidc(token_object: models.Token, *, session: "Session"):
             __change_refresh_state(token_object.token, refresh=False, session=session)
 
             # get access token expiry timestamp
-            jwt_row_dict['lifetime'] = datetime.utcnow() + timedelta(seconds=oidc_tokens['expires_in'])
+            jwt_row_dict['lifetime'] = datetime.now(timezone.utc) + timedelta(seconds=oidc_tokens['expires_in'])
             extra_dict['refresh'] = True
             extra_dict['refresh_token'] = oidc_tokens['refresh_token']
             try:
@@ -1212,7 +1212,7 @@ def __refresh_token_oidc(token_object: models.Token, *, session: "Session"):
                 extra_dict['refresh_expired_at'] = datetime.utcfromtimestamp(float(values['exp']))
             except Exception:
                 # 4 day expiry period by default
-                extra_dict['refresh_expired_at'] = datetime.utcnow() + timedelta(hours=REFRESH_LIFETIME_H)
+                extra_dict['refresh_expired_at'] = datetime.now(timezone.utc) + timedelta(hours=REFRESH_LIFETIME_H)
             new_token = __save_validated_token(oidc_tokens['access_token'], jwt_row_dict, extra_dict=extra_dict, session=session)
             METRICS.counter(name='IdP_authorization.access_token.saved').inc()
             METRICS.counter(name='IdP_authorization.refresh_token.saved').inc()
@@ -1244,7 +1244,7 @@ def delete_expired_oauthrequests(total_workers: int, worker_number: int, limit: 
         query = select(
             models.OAuthRequest.state
         ).where(
-            models.OAuthRequest.expired_at < datetime.utcnow()
+            models.OAuthRequest.expired_at < datetime.now(timezone.utc)
         ).order_by(
             models.OAuthRequest.expired_at
         )
@@ -1316,7 +1316,7 @@ def __get_rucio_jwt_dict(jwt: str, account=None, *, session: "Session"):
         token_payload = __get_keyvalues_from_claims(jwt)
         identity_string = oidc_identity_string(token_payload['sub'], token_payload['iss'])
         expiry_date = datetime.utcfromtimestamp(float(token_payload['exp']))
-        if expiry_date < datetime.utcnow():  # check if expired
+        if expiry_date < datetime.now(timezone.utc):  # check if expired
             logging.debug("Token has already expired since: %s", str(expiry_date))
             return None
         scope = None

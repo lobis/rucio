@@ -42,8 +42,8 @@ def upgrade():
                      sa.Column('adler32', sa.String(8)),
                      sa.Column('scope', sa.String(get_schema_value('SCOPE_LENGTH'))),
                      sa.Column('name', sa.String(get_schema_value('NAME_LENGTH'))),
-                     sa.Column('created_at', sa.DateTime, default=datetime.datetime.utcnow),
-                     sa.Column('updated_at', sa.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow))
+                     sa.Column('created_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)),
+                     sa.Column('updated_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), onupdate=lambda: datetime.datetime.now(datetime.timezone.utc)))
 
         create_table('quarantined_replicas_history',
                      sa.Column('rse_id', GUID()),
@@ -55,7 +55,7 @@ def upgrade():
                      sa.Column('name', sa.String(get_schema_value('NAME_LENGTH'))),
                      sa.Column('created_at', sa.DateTime),
                      sa.Column('updated_at', sa.DateTime),
-                     sa.Column('deleted_at', sa.DateTime, default=datetime.datetime.utcnow))
+                     sa.Column('deleted_at', sa.DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc)))
 
         create_primary_key('QURD_REPLICAS_STATE_PK', 'quarantined_replicas', ['rse_id', 'path'])
         create_check_constraint('QURD_REPLICAS_CREATED_NN', 'quarantined_replicas', 'created_at is not null')

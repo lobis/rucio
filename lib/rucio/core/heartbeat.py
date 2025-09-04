@@ -179,7 +179,7 @@ def live(
              Heartbeat.pid == pid,
              Heartbeat.thread_id == thread_id)
     ).values({
-        Heartbeat.updated_at: datetime.datetime.utcnow(),
+        Heartbeat.updated_at: datetime.datetime.now(datetime.timezone.utc),
         Heartbeat.payload: payload
     })
     if not session.execute(stmt).rowcount:
@@ -202,7 +202,7 @@ def live(
         'oracle'
     ).where(
         and_(Heartbeat.executable == hash_executable,
-             Heartbeat.updated_at >= datetime.datetime.utcnow() - datetime.timedelta(seconds=older_than))
+             Heartbeat.updated_at >= datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=older_than))
     ).group_by(
         Heartbeat.hostname,
         Heartbeat.pid,
@@ -262,7 +262,7 @@ def die(
 
     if older_than:
         stmt = stmt.where(
-            Heartbeat.updated_at < datetime.datetime.utcnow() - datetime.timedelta(seconds=older_than)
+            Heartbeat.updated_at < datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=older_than)
         )
     session.execute(stmt)
 
@@ -282,7 +282,7 @@ def cardiac_arrest(older_than: Optional[int] = None, *, session: "Session") -> N
 
     if older_than:
         stmt = stmt.where(
-            Heartbeat.updated_at < datetime.datetime.utcnow() - datetime.timedelta(seconds=older_than)
+            Heartbeat.updated_at < datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=older_than)
         )
     session.execute(stmt)
 
@@ -344,7 +344,7 @@ def list_payload_counts(
         func.count(Heartbeat.payload)
     ).where(
         and_(Heartbeat.executable == hash_executable,
-             Heartbeat.updated_at >= datetime.datetime.utcnow() - datetime.timedelta(seconds=older_than))
+             Heartbeat.updated_at >= datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=older_than))
     ).group_by(
         Heartbeat.payload
     ).order_by(

@@ -14,7 +14,7 @@
 
 import random
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import delete, update
@@ -162,8 +162,8 @@ class TestHeartbeat:
         assert len(list_heartbeats()) == 6
 
         def __forge_updated_at():
-            two_days_ago = datetime.utcnow() - timedelta(days=2)
-            a_dozen_hours_ago = datetime.utcnow() - timedelta(hours=12)
+            two_days_ago = datetime.now(timezone.utc) - timedelta(days=2)
+            a_dozen_hours_ago = datetime.now(timezone.utc) - timedelta(hours=12)
             stmt = update(
                 Heartbeat
             ).where(

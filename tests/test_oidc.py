@@ -15,7 +15,7 @@
 import time
 import traceback
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 from urllib.parse import parse_qs, urlparse
 
@@ -103,7 +103,7 @@ def save_validated_token(token, valid_dict, extra_dict=None, session=None):
 def validate_jwt(token, **kwargs):
     account = kwargs.get('account', None)
     oidc_token_dict = dencode_access_token(token)
-    expirydate = datetime.utcnow() + timedelta(seconds=3600)
+    expirydate = datetime.now(timezone.utc) + timedelta(seconds=3600)
     validate_dict = {'account': account,
                      'identity': oidc_token_dict['identity'],
                      'lifetime': expirydate,
@@ -1969,7 +1969,7 @@ def test_token_cache() -> None:
     assert _token_cache_get(key) is None
 
     valid_token = JWT().pack([{
-        'exp': int((datetime.utcnow() + timedelta(hours=1)).timestamp())
+        'exp': int((datetime.now(timezone.utc) + timedelta(hours=1)).timestamp())
     }])
     _token_cache_set(key, valid_token)
     assert _token_cache_get(key) == valid_token
@@ -1979,13 +1979,13 @@ def test_token_cache() -> None:
     assert _token_cache_get(key) is None
 
     below_min_lifetime_token = JWT().pack([{
-        'exp': int((datetime.utcnow() + timedelta(minutes=1)).timestamp())
+        'exp': int((datetime.now(timezone.utc) + timedelta(minutes=1)).timestamp())
     }])
     _token_cache_set(key, below_min_lifetime_token)
     assert _token_cache_get(key) is None
 
     expired_token = JWT().pack([{
-        'exp': int((datetime.utcnow() - timedelta(minutes=1)).timestamp())
+        'exp': int((datetime.now(timezone.utc) - timedelta(minutes=1)).timestamp())
     }])
     _token_cache_set(key, expired_token)
     assert _token_cache_get(key) is None

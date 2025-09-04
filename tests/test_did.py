@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -76,7 +76,7 @@ class TestDIDCore:
 
         add_did(scope=mock_scope, name=tmp_dsn1, did_type=DIDType.DATASET, account=root_account)
         add_did(scope=mock_scope, name=tmp_dsn2, did_type=DIDType.DATASET, account=root_account)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         now -= timedelta(microseconds=now.microsecond)
         assert get_did_atime(scope=mock_scope, name=tmp_dsn1) is None
@@ -389,7 +389,7 @@ class TestDIDClients:
         assert len(results) == 3
         results = []
 
-        filters = {'name': '%sfile* % file_prefix', 'created_after': datetime.utcnow() - timedelta(hours=1)}
+        filters = {'name': '%sfile* % file_prefix', 'created_after': datetime.now(timezone.utc) - timedelta(hours=1)}
         for result in did_client.list_dids(tmp_scope, filters):
             results.append(result)
         assert len(results) == 0

@@ -1183,7 +1183,7 @@ def declare_temporary_unavailable_replicas(args, client, logger, console, spinne
     if args.duration is None:
         raise InputValidationError("Duration should have been set, something went wrong!")
 
-    expiration_date = (datetime.datetime.utcnow() + datetime.timedelta(seconds=args.duration)).isoformat()
+    expiration_date = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=args.duration)).isoformat()
 
     chunk_size = 10000
     tot_files = len(bad_files)

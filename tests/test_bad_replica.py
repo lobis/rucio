@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from json import dumps, loads
 
 import pytest
@@ -321,7 +321,7 @@ def __test_rest_bad_replica_methods_for_ui(rest_client, auth_token, list_pfns):
     lost = _fetch_bad_replicas(query_data={'state': 'L', **common_data})
     assert len(total) == len(bad) + len(suspicious) + len(temporary_unavailable) + len(lost)
 
-    tomorrow = datetime.utcnow() + timedelta(days=1)
+    tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
     assert len(_fetch_bad_replicas(query_data={'state': 'B', 'younger_than': tomorrow.isoformat(), **common_data})) == 0
 
     if not list_pfns:
@@ -352,7 +352,7 @@ def test_client_add_temporary_unavailable_pfns(rse_factory, mock_scope, replica_
         list_rep.append(pfn)
 
     # Submit bad PFNs
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     reason_str = generate_uuid()
     replica_client.add_bad_pfns(pfns=list_rep, reason=str(reason_str), state='TEMPORARY_UNAVAILABLE', expires_at=now.isoformat())
     result = get_bad_pfns(limit=10000, thread=None, total_threads=None, session=None)

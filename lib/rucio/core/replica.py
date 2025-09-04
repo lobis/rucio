@@ -19,7 +19,7 @@ import math
 import random
 from collections import defaultdict, namedtuple
 from curses.ascii import isprint
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from itertools import groupby
 from json import dumps
@@ -1691,7 +1691,7 @@ def tombstone_from_delay(tombstone_delay: Optional[Union[str, timedelta]]) -> Op
     if tombstone_delay < timedelta(0):
         return datetime(1970, 1, 1)
 
-    return datetime.utcnow() + tombstone_delay
+    return datetime.now(timezone.utc) + tombstone_delay
 
 
 @transactional_session
@@ -1989,7 +1989,7 @@ def delete_replicas(
         models.BadReplica.state == BadFilesStatus.BAD
     ).values({
         models.BadReplica.state: BadFilesStatus.DELETED,
-        models.BadReplica.updated_at: datetime.utcnow()
+        models.BadReplica.updated_at: datetime.now(timezone.utc)
     }).execution_options(
         synchronize_session=False
     )
@@ -2570,10 +2570,10 @@ def list_and_mark_unlocked_replicas(
     ).where(
         models.RSEFileAssociation.lock_cnt == 0,
         models.RSEFileAssociation.rse_id == rse_id,
-        models.RSEFileAssociation.tombstone == OBSOLETE if only_delete_obsolete else models.RSEFileAssociation.tombstone < datetime.utcnow(),
+        models.RSEFileAssociation.tombstone == OBSOLETE if only_delete_obsolete else models.RSEFileAssociation.tombstone < datetime.now(timezone.utc),
     ).where(
         or_(models.RSEFileAssociation.state.in_((ReplicaState.AVAILABLE, ReplicaState.UNAVAILABLE, ReplicaState.BAD)),
-            and_(models.RSEFileAssociation.state == ReplicaState.BEING_DELETED, models.RSEFileAssociation.updated_at < datetime.utcnow() - timedelta(seconds=delay_seconds)))
+            and_(models.RSEFileAssociation.state == ReplicaState.BEING_DELETED, models.RSEFileAssociation.updated_at < datetime.now(timezone.utc) - timedelta(seconds=delay_seconds)))
     ).outerjoin(
         models.Source,
         and_(models.RSEFileAssociation.scope == models.Source.scope,
@@ -2681,7 +2681,7 @@ def list_and_mark_unlocked_replicas(
                                models.RSEFileAssociation.name == temp_table_cls.name,
                                models.RSEFileAssociation.rse_id == rse_id)))
         ).values({
-            models.RSEFileAssociation.updated_at: datetime.utcnow(),
+            models.RSEFileAssociation.updated_at: datetime.now(timezone.utc),
             models.RSEFileAssociation.state: ReplicaState.BEING_DELETED,
             models.RSEFileAssociation.tombstone: OBSOLETE
         }).execution_options(
@@ -2760,7 +2760,7 @@ def update_replicas_states(
                          models.BadReplica.name == replica['name'])
                 ).values({
                     models.BadReplica.state: BadFilesStatus.RECOVERED,
-                    models.BadReplica.updated_at: datetime.utcnow()
+                    models.BadReplica.updated_at: datetime.now(timezone.utc)
                 }).execution_options(
                     synchronize_session=False
                 )
@@ -2814,7 +2814,7 @@ def touch_replica(
     :returns: True, if successful, False otherwise.
     """
     try:
-        accessed_at, none_value = replica.get('accessed_at') or datetime.utcnow(), None
+        accessed_at, none_value = replica.get('accessed_at') or datetime.now(timezone.utc), None
 
         stmt = select(
             models.RSEFileAssociation
@@ -3219,7 +3219,7 @@ def touch_collection_replicas(
     :returns: True, if successful, False otherwise.
     """
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     for collection_replica in collection_replicas:
         try:
             stmt = update(
@@ -3961,7 +3961,7 @@ def bulk_add_bad_replicas(
                     scope_name_rse_state
                 ).values({
                     models.BadReplica.state: BadFilesStatus.TEMPORARY_UNAVAILABLE,
-                    models.BadReplica.updated_at: datetime.utcnow(),
+                    models.BadReplica.updated_at: datetime.now(timezone.utc),
                     models.BadReplica.account: account,
                     models.BadReplica.reason: reason,
                     models.BadReplica.expires_at: expires_at
@@ -4131,7 +4131,7 @@ def list_expired_temporary_unavailable_replicas(
         'oracle'
     ).where(
         and_(models.BadReplica.state == BadFilesStatus.TEMPORARY_UNAVAILABLE,
-             models.BadReplica.expires_at < datetime.utcnow())
+             models.BadReplica.expires_at < datetime.now(timezone.utc))
     ).order_by(
         models.BadReplica.expires_at
     )
@@ -4228,7 +4228,7 @@ def get_suspicious_files(
     if not isinstance(nattempts, int):
         nattempts = 0
     if not isinstance(younger_than, datetime):
-        younger_than = datetime.utcnow() - timedelta(days=10)
+        younger_than = datetime.now(timezone.utc) - timedelta(days=10)
 
     # assembling exclude_states_clause
     exclude_states_clause = []

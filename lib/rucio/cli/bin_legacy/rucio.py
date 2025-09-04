@@ -23,7 +23,7 @@ import time
 import unittest
 import uuid
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
 
 from rich.console import Console
@@ -851,9 +851,9 @@ def upload(args, client, logger, console, spinner):
         raise InputValidationError("--lifetime and --expiration-date cannot be specified at the same time.")
     elif args.expiration_date:
         expiration_date = datetime.strptime(args.expiration_date, "%Y-%m-%d-%H:%M:%S")
-        if expiration_date < datetime.utcnow():
+        if expiration_date < datetime.now(timezone.utc):
             raise ValueError("The specified expiration date should be in the future!")
-        args.lifetime = (expiration_date - datetime.utcnow()).total_seconds()
+        args.lifetime = (expiration_date - datetime.now(timezone.utc)).total_seconds()
 
     dsscope = None
     dsname = None
