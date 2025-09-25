@@ -130,8 +130,6 @@ class TestOpenDataCore:
             with pytest.raises(OpenDataDataIdentifierNotFound):
                 opendata.delete_opendata_did(scope=mock_scope, name=name, session=db_write_session)
 
-            db_write_session.commit()
-
             with pytest.raises(OpenDataDataIdentifierNotFound):
                 opendata.get_opendata_did(scope=mock_scope, name=name, session=db_write_session)
 
@@ -140,8 +138,6 @@ class TestOpenDataCore:
 
         add_did(scope=mock_scope, name=name, account=root_account, did_type=DIDType.DATASET, session=db_write_session)
         opendata.add_opendata_did(scope=mock_scope, name=name, session=db_write_session)
-
-        db_write_session.commit()
 
         state = opendata.get_opendata_did(scope=mock_scope, name=name, session=db_write_session)["state"]
 
@@ -159,8 +155,6 @@ class TestOpenDataCore:
         opendata.update_opendata_did(scope=mock_scope, name=name, state=OpenDataDIDState.PUBLIC,
                                      session=db_write_session)
 
-        db_write_session.commit()
-
         state = opendata.get_opendata_did(scope=mock_scope, name=name, session=db_write_session)["state"]
 
         assert state == OpenDataDIDState.PUBLIC
@@ -172,8 +166,6 @@ class TestOpenDataCore:
         opendata.update_opendata_did(scope=mock_scope, name=name, state=OpenDataDIDState.SUSPENDED,
                                      session=db_write_session)
 
-        db_write_session.commit()
-
         state = opendata.get_opendata_did(scope=mock_scope, name=name, session=db_write_session)["state"]
 
         assert state == OpenDataDIDState.SUSPENDED
@@ -184,8 +176,6 @@ class TestOpenDataCore:
 
         opendata.update_opendata_did(scope=mock_scope, name=name, state=OpenDataDIDState.PUBLIC,
                                      session=db_write_session)
-
-        db_write_session.commit()
 
         state = opendata.get_opendata_did(scope=mock_scope, name=name, session=db_write_session)["state"]
 
@@ -199,16 +189,12 @@ class TestOpenDataCore:
                 session=db_write_session)
         opendata.add_opendata_did(scope=mock_scope, name=name, session=db_write_session)
 
-        db_write_session.commit()
-
         meta = opendata.get_opendata_meta(scope=mock_scope, name=name, session=db_write_session)
 
         assert meta == {}, "'meta' should be empty"
         meta_new = {"test": "test", "key": {"test": "test"}}
 
         opendata.update_opendata_did(scope=mock_scope, name=name, meta=meta_new, session=db_write_session)
-
-        db_write_session.commit()
 
         meta = opendata.get_opendata_meta(scope=mock_scope, name=name, session=db_write_session)
 
@@ -225,13 +211,9 @@ class TestOpenDataCore:
 
         opendata.update_opendata_did(scope=mock_scope, name=name, doi=doi, session=db_write_session)
 
-        db_write_session.commit()
-
         doi_after = opendata.get_opendata_did(scope=mock_scope, name=name, session=db_write_session)["doi"]
 
         assert doi_after == doi, "DOI should be updated"
-
-        db_write_session.commit()
 
         doi_after = opendata.get_opendata_doi(scope=mock_scope, name=name, session=db_write_session)
 
@@ -239,8 +221,6 @@ class TestOpenDataCore:
 
         doi = doi_factory()
         opendata.update_opendata_doi(scope=mock_scope, name=name, doi=doi, session=db_write_session)
-
-        db_write_session.commit()
 
         doi_after = opendata.get_opendata_did(scope=mock_scope, name=name, session=db_write_session)["doi"]
 
@@ -286,8 +266,6 @@ class TestOpenDataCore:
             opendata.list_opendata_dids(state=OpenDataDIDState.PUBLIC, session=db_write_session)["dids"])
 
         assert opendata_public_number_after - opendata_public_number_before == 1, "Public number should be 1 more"
-
-        db_write_session.commit()
 
         opendata_did_public_new = opendata.get_opendata_did(scope=mock_scope, name=did_public_name,
                                                             session=db_write_session)
