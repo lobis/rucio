@@ -84,6 +84,8 @@ future==1.0.0
     # via pyjwkest
 geoip2==5.1.0
     # via -r requirements.server.in
+gfal==0.1.41
+    # via -r requirements.server.in
 globus-sdk==4.1.0
     # via -r requirements.server.in
 google-auth==2.42.1
