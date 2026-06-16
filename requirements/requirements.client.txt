@@ -8,6 +8,7 @@ packaging>=25.0                                             # Packaging utilitie
 rich>=14.2.0                                                # For Rich terminal display
 typing-extensions>=4.15.0                                   # Type annotations that are not yet supported in the `typing` module
 click>=8.3.0                                                # CLI engine
+xrootd>=6.0.3                                               # Native XRootD Python bindings
 
 # All dependencies needed in extras for rucio client should be defined here
 paramiko>=4.0.0                                             # ssh_extras; SSH2 protocol library (also needed in the server)

@@ -46,6 +46,7 @@ dependencies = [
   'flask<=3.1.2',
   'oic<=1.7.0',
   'prometheus_client<=0.23.1',
+  'xrootd>=6.0.3',
 ]
 requires-python = ">=3.9"
 authors = [

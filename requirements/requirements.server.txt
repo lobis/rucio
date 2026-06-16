@@ -301,6 +301,8 @@ xmlsec==1.3.16
     # via
     #   -r requirements.server.in
     #   python3-saml
+xrootd>=6.0.3
+    # via -r requirements.server.in
 yarl==1.22.0
     # via aiohttp
 zipp==3.23.0
