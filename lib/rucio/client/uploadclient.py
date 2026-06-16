@@ -426,11 +426,8 @@ class UploadClient:
                     domain = 'lan'
             logger(logging.DEBUG, '{} domain is used for the upload'.format(domain))
 
-            # FIXME:
-            # Rewrite preferred_impl selection - also check test_upload.py/test_download.py and fix impl order (see FIXME there)
-            #
-            # if not impl and not force_scheme:
-            #    impl = self.preferred_impl(rse_settings, domain)
+            if not impl and not force_scheme:
+                impl = self.preferred_impl(rse_settings, domain)
 
             if not no_register and not register_after_upload:
                 self._register_file(file,
@@ -1466,32 +1463,34 @@ class UploadClient:
             self.logger(logging.INFO, 'No preferred protocol impl in rucio.cfg: %s' % (error))
             pass
         else:
-            preferred_impls = list(preferred_impls.split(', '))
-            i = 0
-            while i < len(preferred_impls):
-                impl = preferred_impls[i]
-                impl_split = impl.split('.')
-                if len(impl_split) == 1:
-                    preferred_impls[i] = 'rucio.rse.protocols.' + impl + '.Default'
-                else:
-                    preferred_impls[i] = 'rucio.rse.protocols.' + impl
-                i += 1
+            preferred_impls = [
+                'rucio.rse.protocols.' + impl.strip() + '.Default'
+                if '.' not in impl.strip()
+                else impl.strip()
+                if impl.strip().startswith('rucio.')
+                else 'rucio.rse.protocols.' + impl.strip()
+                for impl in preferred_impls.split(',')
+                if impl.strip()
+            ]
 
-            preferred_protocols = [protocol for protocol in reversed(rse_settings['protocols']) if
-                                   protocol['impl'] in preferred_impls]
+            for preferred_impl in preferred_impls:
+                preferred_protocols.extend([
+                    protocol for protocol in rse_settings['protocols']
+                    if protocol['impl'] == preferred_impl and protocol not in preferred_protocols
+                ])
 
         if len(preferred_protocols) > 0:
-            preferred_protocols += [protocol for protocol in reversed(rse_settings['protocols']) if
+            preferred_protocols += [protocol for protocol in rse_settings['protocols'] if
                                     protocol not in preferred_protocols]
         else:
-            preferred_protocols = reversed(rse_settings['protocols'])
+            preferred_protocols = rse_settings['protocols']
 
         for protocol in preferred_protocols:
             if domain not in list(protocol['domains'].keys()):
                 self.logger(logging.DEBUG,
                             'Unsuitable protocol "%s": Domain %s not supported' % (protocol['impl'], domain))
                 continue
-            if not all(operations in protocol['domains'][domain] for operations in ("read", "write", "delete")):
+            if not all(protocol['domains'][domain].get(operation) is not None for operation in ("read", "write", "delete")):
                 self.logger(logging.DEBUG,
                             'Unsuitable protocol "%s": All operations are not supported' % (protocol['impl']))
                 continue

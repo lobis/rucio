@@ -18,9 +18,100 @@ import pytest
 
 from rucio.common.utils import execute
 from rucio.rse import rsemanager
+from rucio.rse.protocols import xrootd
 from rucio.tests.common import load_test_conf_file, skip_rse_tests_with_accounts
 
 from .rsemgr_api_test import MgrTestCases
+
+
+class _Status:
+    def __init__(self, ok=True, message=''):
+        self.ok = ok
+        self.message = message
+
+
+class _StatInfo:
+    size = 1234
+
+
+class _QueryCode:
+    CHECKSUM = 'checksum'
+
+
+class _MkDirFlags:
+    MAKEPATH = 'makepath'
+
+
+class _Flags:
+    QueryCode = _QueryCode
+    MkDirFlags = _MkDirFlags
+
+
+class _FileSystem:
+    def __init__(self):
+        self.renamed = False
+
+    def stat(self, path):
+        return _Status(), _StatInfo()
+
+    def query(self, query_code, path):
+        return _Status(), b'adler32 deadbeef\n\0'
+
+    def mkdir(self, path, flags):
+        return _Status(ok=False, message='[ERROR] Unable to mkdir {}; file exists'.format(path)), None
+
+    def mv(self, path, new_path):
+        self.renamed = True
+        return _Status(), None
+
+
+class _XRootDClient:
+    def __init__(self, version):
+        self.__version__ = version
+
+
+def test_native_xrootd_requires_version_6_or_newer():
+    assert not xrootd._is_supported_xrootd_version(_XRootDClient('5.8.4'))
+    assert xrootd._is_supported_xrootd_version(_XRootDClient('6.0.0'))
+    assert xrootd._is_supported_xrootd_version(_XRootDClient('6.0.3'))
+    assert xrootd._is_supported_xrootd_version(_XRootDClient('6.1.0'))
+    assert xrootd._is_supported_xrootd_version(_XRootDClient('v6.1.0'))
+
+
+def test_native_xrootd_clears_unexpanded_proxy_from_env(monkeypatch):
+    protocol = xrootd.Default.__new__(xrootd.Default)
+
+    monkeypatch.setenv('X509_USER_PROXY', '$RUCIO_CLIENT_PROXY')
+
+    protocol._clear_unexpanded_x509_proxy()
+
+    assert 'X509_USER_PROXY' not in os.environ
+
+
+def test_native_xrootd_stat_accepts_bytes_checksum(monkeypatch):
+    protocol = xrootd.Default.__new__(xrootd.Default)
+    protocol.logger = lambda *args, **kwargs: None
+    protocol.rse = {'verify_checksum': True}
+    protocol._filesystem = lambda: _FileSystem()
+
+    monkeypatch.setattr(xrootd, '_xrootd_flags', _Flags)
+
+    assert protocol.stat('/tmp/file') == {'filesize': '1234', 'adler32': 'deadbeef'}
+
+
+def test_native_xrootd_rename_ignores_existing_directory(monkeypatch):
+    fs = _FileSystem()
+    protocol = xrootd.Default.__new__(xrootd.Default)
+    protocol.logger = lambda *args, **kwargs: None
+    protocol._filesystem = lambda: fs
+    protocol.exists = lambda pfn: True
+    protocol.pfn2path = lambda pfn: pfn
+
+    monkeypatch.setattr(xrootd, '_xrootd_flags', _Flags)
+
+    protocol.rename('/tmp/file.rucio.upload', '/tmp/file')
+
+    assert fs.renamed
 
 
 @pytest.mark.noparallel(reason='creates and removes a test directory with a fixed name')

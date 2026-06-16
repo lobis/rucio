@@ -156,6 +156,7 @@ jobs:
             ln -sf /root/.ssh/ruciouser_sshkey.pub /root/.ssh/id_rsa.pub 2>/dev/null || true
 
             pip install --no-cache-dir -e /rucio_source
+            python3 -m pip install --no-cache-dir 'xrootd>=6.0.0'
             tools/run_tests.sh -ir
           "
       - name: File Upload/Download Test
