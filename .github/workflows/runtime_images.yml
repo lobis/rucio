@@ -12,16 +12,6 @@ on:
       build_locally:
         description: "Whether images should be built locally in autotests"
         value: ${{ jobs.build_runtime_images.outputs.build_locally }}
-  schedule:
-    - cron: '0 3 * * *'
-  push:
-    branches:
-      - master
-    paths:
-      - 'etc/docker/test/runtime.Dockerfile'
-      - 'requirements/requirements.server.txt'
-      - 'requirements/requirements.dev.txt'
-  workflow_dispatch:
 
 jobs:
   build_runtime_images:
