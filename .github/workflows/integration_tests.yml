@@ -178,7 +178,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          docker exec -t dev-rucio-1 tools/pytest.sh -v --tb=short tests/test_conveyor.py::test_receiver_archiving
+          docker exec -t dev-rucio-1 tools/pytest.sh -v --tb=short tests/test_conveyor.py -k "test_preparer_throttler_submitter or test_transfer_plugins or test_multihop_intermediate_replica_lifecycle or test_fts_non_recoverable_failures_handled_on_multihop or test_fts_recoverable_failures_handled_on_multihop or test_receiver_archiving"
           status=$?
           echo "::group::FTS logs"
           docker logs dev-fts-1 || true
