@@ -31,7 +31,8 @@ dependencies = [
         'tabulate',
         'jsonschema',
         'rich',
-        'typing_extensions'
+        'typing_extensions',
+        'gfal<=0.1.41'
 ]
 requires-python = ">=3.9"
 authors = [

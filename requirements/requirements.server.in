@@ -41,3 +41,4 @@ elasticsearch==8.15.1                                        # elasticsearch (me
 libtorrent==2.0.11                                          # Support for the bittorrent transfertool
 qbittorrent-api==2025.7.0                                   # qBittorrent plugin for the bittorrent tranfsertool
 rich==14.2.0                                                # For Rich terminal display
+gfal==0.1.41                                                # Python GFAL replacement used by the opt-in gfal protocol backend
