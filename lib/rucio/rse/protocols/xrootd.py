@@ -196,11 +196,6 @@ class Default(protocol.RSEProtocol):
             auth_env = self._auth_env_snapshot()
             try:
                 self._configure_auth(xrootd_client)
-                for key, val in auth_env.items():
-                    if val is None:
-                        os.environ.pop(key, None)
-                    else:
-                        os.environ[key] = val
                 yield
             finally:
                 self._restore_auth_env(xrootd_client, auth_env)
@@ -248,7 +243,7 @@ class Default(protocol.RSEProtocol):
             )
             prepare_status = copy_process.prepare()
             self._ensure_ok(prepare_status)
-            copy_status, copy_results = copy_process.run()
+        copy_status, copy_results = copy_process.run()
         if not self._status_ok(copy_status) and copy_results:
             copy_status = copy_results[0].get('status', copy_status)
         self._ensure_ok(copy_status, source_not_found=True)
@@ -314,7 +309,7 @@ class Default(protocol.RSEProtocol):
             with self._xrootd_operation():
                 status, stat_info = self._filesystem().stat(path)
                 self._ensure_ok(status, source_not_found=True)
-                ret['filesize'] = int(getattr(stat_info, 'size'))
+                ret['filesize'] = str(getattr(stat_info, 'size'))
 
                 if not self.rse.get('verify_checksum', True):
                     return ret
