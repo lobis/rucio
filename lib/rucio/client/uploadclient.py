@@ -426,8 +426,9 @@ class UploadClient:
                     domain = 'lan'
             logger(logging.DEBUG, '{} domain is used for the upload'.format(domain))
 
+            preferred_impl = None
             if not impl and not force_scheme:
-                impl = self.preferred_impl(rse_settings, domain)
+                preferred_impl = self.preferred_impl(rse_settings, domain)
 
             if not no_register and not register_after_upload:
                 self._register_file(file,
@@ -442,7 +443,7 @@ class UploadClient:
                                  pfn if pfn else file_did,  # type: ignore (pfn is str)
                                  domain=domain,
                                  scheme=force_scheme,
-                                 impl=impl,
+                                 impl=impl or preferred_impl,
                                  auth_token=self.auth_token,
                                  vo=self.client.vo,
                                  logger=logger):
@@ -459,7 +460,7 @@ class UploadClient:
                                  pfn,  # type: ignore (pfn is str)
                                  domain=domain,
                                  scheme=force_scheme,
-                                 impl=impl,
+                                 impl=impl or preferred_impl,
                                  auth_token=self.auth_token,
                                  vo=self.client.vo,
                                  logger=logger):
@@ -471,7 +472,7 @@ class UploadClient:
                                    file_did,
                                    domain=domain,
                                    scheme=force_scheme,
-                                   impl=impl,
+                                   impl=impl or preferred_impl,
                                    auth_token=self.auth_token,
                                    vo=self.client.vo,
                                    logger=logger):
@@ -483,7 +484,7 @@ class UploadClient:
                                  pfn if pfn else file_did,  # type: ignore (pfn is str)
                                  domain=domain,
                                  scheme=force_scheme,
-                                 impl=impl,
+                                 impl=impl or preferred_impl,
                                  auth_token=self.auth_token,
                                  vo=self.client.vo,
                                  logger=logger):
@@ -497,6 +498,8 @@ class UploadClient:
                                                      scheme=force_scheme,
                                                      domain=domain,
                                                      impl=impl)
+            if preferred_impl and len(protocols) > 1:
+                protocols.sort(key=lambda p: p.get('impl') != preferred_impl)
             protocols.reverse()
             success = False
             state_reason = ''
@@ -528,7 +531,7 @@ class UploadClient:
                                             lfn=lfn,
                                             source_dir=file['dirname'],
                                             domain=domain,
-                                            impl=impl,
+                                            impl=impl or protocol.get('impl'),
                                             force_scheme=cur_scheme,
                                             force_pfn=pfn,
                                             transfer_timeout=file.get('transfer_timeout'),

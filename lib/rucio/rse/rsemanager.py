@@ -555,7 +555,7 @@ def upload(
                         # Upload is successful if at least one checksum was found
                         valid = any(verified_checksums)
                         if not valid and ('filesize' in stats) and ('filesize' in lfn):
-                            valid = stats['filesize'] == lfn['filesize']
+                            valid = int(stats['filesize']) == int(lfn['filesize'])
                     except NotImplementedError:
                         if rse_settings['verify_checksum'] is False:
                             valid = True

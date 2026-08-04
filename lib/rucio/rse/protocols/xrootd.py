@@ -115,8 +115,8 @@ class Default(protocol.RSEProtocol):
     def _valid_x509_proxy(self) -> str | None:
         for proxy in (
             os.environ.get('RUCIO_CLIENT_PROXY'),
-            os.environ.get('X509_USER_PROXY'),
             self._configured_x509_proxy(),
+            os.environ.get('X509_USER_PROXY'),
             self._default_x509_proxy(),
         ):
             expanded_proxy = self._expand_x509_proxy(proxy)
@@ -196,6 +196,11 @@ class Default(protocol.RSEProtocol):
             auth_env = self._auth_env_snapshot()
             try:
                 self._configure_auth(xrootd_client)
+                for key, val in auth_env.items():
+                    if val is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = val
                 yield
             finally:
                 self._restore_auth_env(xrootd_client, auth_env)
@@ -211,7 +216,6 @@ class Default(protocol.RSEProtocol):
             return False
         return (
             getattr(status, 'code', None) == getattr(status, 'errNotFound', None)
-            or getattr(status, 'shellcode', None) == 54
             or 'No such file' in getattr(status, 'message', '')
         )
 
@@ -230,6 +234,8 @@ class Default(protocol.RSEProtocol):
     def _copy(self, source: str, target: str, transfer_timeout: int | None = None) -> None:
         xrootd_client = cast('Any', _client())
         timeout = int(transfer_timeout or self._COPY_DEFAULT_TIMEOUT)
+        cptimeout = min(timeout, 65535) if timeout > 0 else 0
+        inittimeout = min(timeout or 600, 65535)
         with self._xrootd_operation():
             copy_process = xrootd_client.CopyProcess()
             copy_process.add_job(
@@ -237,8 +243,8 @@ class Default(protocol.RSEProtocol):
                 target,
                 force=True,
                 mkdir=True,
-                cptimeout=timeout,
-                inittimeout=timeout or 600,
+                cptimeout=cptimeout,
+                inittimeout=inittimeout,
             )
             prepare_status = copy_process.prepare()
             self._ensure_ok(prepare_status)
@@ -308,7 +314,7 @@ class Default(protocol.RSEProtocol):
             with self._xrootd_operation():
                 status, stat_info = self._filesystem().stat(path)
                 self._ensure_ok(status, source_not_found=True)
-                ret['filesize'] = str(getattr(stat_info, 'size'))
+                ret['filesize'] = int(getattr(stat_info, 'size'))
 
                 if not self.rse.get('verify_checksum', True):
                     return ret

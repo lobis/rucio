@@ -848,17 +848,27 @@ class DownloadClient:
             logger(logging.INFO, '%sTrying to download with %s%s from %s: %s ' % (log_prefix, scheme, timeout_log_string, rse_name, did_str))
 
             impl = item.get('impl')
-            if impl:
-                logger(logging.INFO, '%sUsing Implementation (impl): %s ' % (log_prefix, impl))
+            preferred_impl = item.get('preferred_impl')
+            if impl or preferred_impl:
+                logger(logging.INFO, '%sUsing Implementation (impl): %s ' % (log_prefix, impl or preferred_impl))
 
             try:
-                protocol = rsemgr.create_protocol(rse, operation='read', scheme=scheme, impl=impl, auth_token=self.auth_token, logger=logger)
+                protocol = rsemgr.create_protocol(rse, operation='read', scheme=scheme, impl=impl or preferred_impl, auth_token=self.auth_token, logger=logger)
                 protocol.connect()
-            except Exception as error:
-                logger(logging.WARNING, '%sFailed to create protocol for PFN: %s' % (log_prefix, pfn))
-                logger(logging.DEBUG, 'scheme: %s, exception: %s' % (scheme, error))
-                trace['stateReason'] = str(error)
-                continue
+            except Exception as err:
+                create_err: Optional[Exception] = err
+                if preferred_impl and not impl:
+                    try:
+                        protocol = rsemgr.create_protocol(rse, operation='read', scheme=scheme, impl=None, auth_token=self.auth_token, logger=logger)
+                        protocol.connect()
+                        create_err = None
+                    except Exception:
+                        pass
+                if create_err is not None:
+                    logger(logging.WARNING, '%sFailed to create protocol for PFN: %s' % (log_prefix, pfn))
+                    logger(logging.DEBUG, 'scheme: %s, exception: %s' % (scheme, create_err))
+                    trace['stateReason'] = str(create_err)
+                    continue
 
             logger(logging.INFO, '%sUsing PFN: %s' % (log_prefix, pfn))
             attempt = 0
@@ -1511,7 +1521,7 @@ class DownloadClient:
                 if impl:
                     file['impl'] = impl
                 elif not item.get('force_scheme'):
-                    file['impl'] = self.preferred_impl(file['sources'])
+                    file['preferred_impl'] = self.preferred_impl(file['sources'])
 
             logger(logging.DEBUG, 'num resolved files: %s' % len(file_items))
 
@@ -1525,7 +1535,7 @@ class DownloadClient:
                     if not any([input_did == f['did'] or str(input_did) in f['parent_dids'] for f in file_items]):
                         logger(logging.ERROR, 'DID does not exist: %s' % input_did)
                         # TODO: store DID directly as DIDType object
-                        file_items.append({'did': str(input_did), 'adler32': None, 'md5': None, 'sources': [], 'parent_dids': set(), 'impl': impl or None})
+                        file_items.append({'did': str(input_did), 'adler32': None, 'md5': None, 'sources': [], 'parent_dids': set(), 'impl': impl or None, 'preferred_impl': None})
 
             # filtering out tape sources
             if self.is_tape_excluded:

@@ -67,6 +67,7 @@ swift = ['python-swiftclient']
 argcomplete = ['argcomplete']
 sftp = ['paramiko']
 dumper = ['python-magic']
+xrootd = ['xrootd>=6.0.0']
 
 [project.urls]
 Homepage = "https://rucio.cern.ch/"
