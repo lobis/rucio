@@ -443,7 +443,7 @@ class UploadClient:
                                  pfn if pfn else file_did,  # type: ignore (pfn is str)
                                  domain=domain,
                                  scheme=force_scheme,
-                                 impl=impl or preferred_impl,
+                                 impl=impl,
                                  auth_token=self.auth_token,
                                  vo=self.client.vo,
                                  logger=logger):
@@ -460,7 +460,7 @@ class UploadClient:
                                  pfn,  # type: ignore (pfn is str)
                                  domain=domain,
                                  scheme=force_scheme,
-                                 impl=impl or preferred_impl,
+                                 impl=impl,
                                  auth_token=self.auth_token,
                                  vo=self.client.vo,
                                  logger=logger):
@@ -472,7 +472,7 @@ class UploadClient:
                                    file_did,
                                    domain=domain,
                                    scheme=force_scheme,
-                                   impl=impl or preferred_impl,
+                                   impl=impl,
                                    auth_token=self.auth_token,
                                    vo=self.client.vo,
                                    logger=logger):
@@ -484,7 +484,7 @@ class UploadClient:
                                  pfn if pfn else file_did,  # type: ignore (pfn is str)
                                  domain=domain,
                                  scheme=force_scheme,
-                                 impl=impl or preferred_impl,
+                                 impl=impl,
                                  auth_token=self.auth_token,
                                  vo=self.client.vo,
                                  logger=logger):
@@ -531,7 +531,8 @@ class UploadClient:
                                             lfn=lfn,
                                             source_dir=file['dirname'],
                                             domain=domain,
-                                            impl=impl or protocol.get('impl'),
+                                            impl=impl,
+                                            write_impl=protocol.get('impl'),
                                             force_scheme=cur_scheme,
                                             force_pfn=pfn,
                                             transfer_timeout=file.get('transfer_timeout'),
@@ -992,6 +993,7 @@ class UploadClient:
             source_dir: Optional[str] = None,
             domain: str = 'wan',
             impl: Optional[str] = None,
+            write_impl: Optional[str] = None,
             force_pfn: Optional[str] = None,
             force_scheme: Optional[str] = None,
             transfer_timeout: Optional[int] = None,
@@ -1022,7 +1024,11 @@ class UploadClient:
         domain
             Network domain for the upload, commonly 'wan' for wide-area networks.
         impl
-            Name of the protocol implementation to be enforced (if any).
+            Name of the protocol implementation explicitly enforced by the user
+            for all operations (if any).
+        write_impl
+            Write implementation selected by the upload fallback loop. Read and
+            delete operations remain independently selected for the same scheme.
         force_pfn
             If provided, forces the use of this PFN for the file location on the storage
             (use with care since it can lead to "dark" data).
@@ -1059,7 +1065,7 @@ class UploadClient:
                                                'write',
                                                force_scheme=force_scheme,
                                                domain=domain,
-                                               impl=impl)
+                                               impl=write_impl or impl)
 
         base_name = lfn.get('filename', lfn['name'])
         name = lfn.get('name', base_name)
@@ -1433,14 +1439,14 @@ class UploadClient:
             domain: str
     ) -> Optional[str]:
         """
-        Select a suitable protocol implementation for read, write, and delete operations on
-        the given RSE and domain.
+        Select a suitable write protocol implementation on the given RSE and domain.
 
         This method checks the local client configuration (under the `[upload] preferred_impl`
         setting) and compares it against the list of protocols declared in `rse_settings`.
-        It attempts to find a protocol that supports the required I/O operations (read,
-        write, delete) in the specified domain. If multiple preferred protocols are listed
-        in the config, it iterates in order and returns the first viable match.
+        It attempts to find a protocol that supports writes in the specified domain. Read
+        and delete implementations are selected independently when needed. If multiple
+        preferred protocols are listed in the config, it iterates in order and returns the
+        first viable match.
 
         Parameters
         ----------
@@ -1496,9 +1502,9 @@ class UploadClient:
                 self.logger(logging.DEBUG,
                             'Unsuitable protocol "%s": Domain %s not supported' % (protocol['impl'], domain))
                 continue
-            if not all(protocol['domains'][domain].get(operation) is not None for operation in ("read", "write", "delete")):
+            if protocol['domains'][domain].get('write') is None:
                 self.logger(logging.DEBUG,
-                            'Unsuitable protocol "%s": All operations are not supported' % (protocol['impl']))
+                            'Unsuitable protocol "%s": Write operation is not supported' % (protocol['impl']))
                 continue
             try:
                 supported_protocol = rsemgr.create_protocol(rse_settings, 'write', domain=domain, impl=protocol['impl'],

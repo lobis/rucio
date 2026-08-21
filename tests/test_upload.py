@@ -20,7 +20,7 @@ from random import choice
 from string import ascii_uppercase
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -62,6 +62,76 @@ def scope(vo, containerized_rses, test_scope, mock_scope):
         return str(test_scope)
     else:
         return str(mock_scope)
+
+
+def test_upload_item_selects_read_and_delete_implementations_independently():
+    upload_client = UploadClient.__new__(UploadClient)
+    upload_client.logger = MagicMock()
+    upload_client.client = MagicMock()
+    upload_client.auth_token = None
+    write_impl = 'rucio.rse.protocols.xrootd.Default'
+    write_protocol = MagicMock(renaming=True, overwrite=False)
+    read_protocol = MagicMock()
+    delete_protocol = MagicMock()
+    pfn = 'root://example.com//file'
+    write_protocol.lfns2pfns.return_value = {'mock:file': pfn}
+    read_protocol.exists.side_effect = [False, True]
+    delete_protocol.lfns2pfns.return_value = {'mock:file': pfn}
+
+    protocols = {
+        'write': write_protocol,
+        'read': read_protocol,
+        'delete': delete_protocol,
+    }
+
+    def create_protocol(_rse_settings, operation, **_kwargs):
+        return protocols[operation]
+
+    def immediate_retry(function, *args, **kwargs):
+        return lambda **_retry_kwargs: function(*args, **kwargs)
+
+    upload_client.client.get_signed_url.side_effect = lambda _rse, _service, _operation, value: value
+    with patch.object(upload_client, '_create_protocol', side_effect=create_protocol) as create, \
+            patch('rucio.client.uploadclient.retry', side_effect=immediate_retry):
+        result = upload_client._upload_item(
+            rse_settings={'rse': 'MOCK', 'verify_checksum': False},
+            rse_attributes={RseAttr.SKIP_UPLOAD_STAT: True},
+            lfn={'scope': 'mock', 'name': 'file', 'filename': 'file', 'filesize': 4},
+            source_dir='/tmp',
+            write_impl=write_impl,
+            sign_service='mock-signing-service',
+        )
+
+    assert result == pfn
+    assert create.call_args_list[0].kwargs['impl'] == write_impl
+    assert create.call_args_list[1].args[1] == 'read'
+    assert create.call_args_list[1].kwargs['impl'] is None
+    assert create.call_args_list[2].args[1] == 'delete'
+    assert create.call_args_list[2].kwargs['impl'] is None
+    delete_protocol.delete.assert_called_once_with('%s.rucio.upload' % pfn)
+    write_protocol.put.assert_called_once()
+
+
+def test_upload_preferred_impl_only_requires_write_support():
+    upload_client = UploadClient.__new__(UploadClient)
+    upload_client.logger = MagicMock()
+    upload_client.auth_token = None
+    write_impl = 'rucio.rse.protocols.xrootd.Default'
+    rse_settings = {
+        'protocols': [{
+            'impl': write_impl,
+            'domains': {
+                'wan': {'read': None, 'write': 1, 'delete': None},
+            },
+        }],
+    }
+    protocol = MagicMock()
+
+    with patch('rucio.client.uploadclient.config_get', return_value='xrootd'), \
+            patch('rucio.client.uploadclient.rsemgr.create_protocol', return_value=protocol):
+        assert upload_client.preferred_impl(rse_settings, 'wan') == write_impl
+
+    protocol.connect.assert_called_once()
 
 
 @pytest.mark.parametrize("file_config_mock", [

@@ -852,62 +852,80 @@ class DownloadClient:
             if impl or preferred_impl:
                 logger(logging.INFO, '%sUsing Implementation (impl): %s ' % (log_prefix, impl or preferred_impl))
 
-            try:
-                protocol = rsemgr.create_protocol(rse, operation='read', scheme=scheme, impl=impl or preferred_impl, auth_token=self.auth_token, logger=logger)
-                protocol.connect()
-            except Exception as err:
-                create_err: Optional[Exception] = err
-                if preferred_impl and not impl:
+            logger(logging.INFO, '%sUsing PFN: %s' % (log_prefix, pfn))
+            candidate_impls: list[str | None] = [impl]
+            if not impl:
+                candidate_impls = [preferred_impl] if preferred_impl else [None]
+                if preferred_impl:
                     try:
-                        protocol = rsemgr.create_protocol(rse, operation='read', scheme=scheme, impl=None, auth_token=self.auth_token, logger=logger)
-                        protocol.connect()
-                        create_err = None
-                    except Exception:
-                        pass
-                if create_err is not None:
+                        protocols = rsemgr.get_protocols_ordered(rse, operation='read', scheme=scheme)
+                    except Exception as error:
+                        logger(logging.DEBUG, '%sCould not enumerate fallback protocols: %s' % (log_prefix, error))
+                        candidate_impls.append(None)
+                    else:
+                        candidate_impls.extend(
+                            protocol['impl']
+                            for protocol in protocols
+                            if protocol.get('impl') not in candidate_impls
+                        )
+
+            for candidate_impl in candidate_impls:
+                try:
+                    protocol = rsemgr.create_protocol(
+                        rse,
+                        operation='read',
+                        scheme=scheme,
+                        impl=candidate_impl,
+                        auth_token=self.auth_token,
+                        logger=logger,
+                    )
+                    protocol.connect()
+                except Exception as error:
                     logger(logging.WARNING, '%sFailed to create protocol for PFN: %s' % (log_prefix, pfn))
-                    logger(logging.DEBUG, 'scheme: %s, exception: %s' % (scheme, create_err))
-                    trace['stateReason'] = str(create_err)
+                    logger(logging.DEBUG, 'scheme: %s, impl: %s, exception: %s' % (scheme, candidate_impl, error))
+                    trace['stateReason'] = str(error)
                     continue
 
-            logger(logging.INFO, '%sUsing PFN: %s' % (log_prefix, pfn))
-            attempt = 0
-            retries = 2
-            # do some retries with the same PFN if the download fails
-            while not success and attempt < retries:
-                attempt += 1
-                item['attemptnr'] = attempt
+                attempt = 0
+                retries = 2
+                # Retry the PFN with each implementation before falling back
+                # to the next compatible implementation for the same scheme.
+                while not success and attempt < retries:
+                    attempt += 1
+                    item['attemptnr'] = attempt
 
-                if os.path.isfile(temp_file_path):
-                    logger(logging.DEBUG, '%sDeleting existing temporary file: %s' % (log_prefix, temp_file_path))
-                    os.unlink(temp_file_path)
-
-                start_time = time.time()
-
-                try:
-                    protocol.get(pfn, temp_file_path, transfer_timeout=transfer_timeout)
-                    success = True
-                except Exception as error:
-                    logger(logging.DEBUG, error)
-                    trace['clientState'] = FileDownloadState.FAILED
-                    trace['stateReason'] = str(error)
-
-                end_time = time.time()
-
-                if success and not item.get('merged_options', {}).get('ignore_checksum', False):
-                    verified, rucio_checksum, local_checksum = _verify_checksum(item, temp_file_path)
-                    if not verified:
-                        success = False
+                    if os.path.isfile(temp_file_path):
+                        logger(logging.DEBUG, '%sDeleting existing temporary file: %s' % (log_prefix, temp_file_path))
                         os.unlink(temp_file_path)
-                        logger(logging.WARNING, '%sChecksum validation failed for file: %s' % (log_prefix, did_str))
-                        logger(logging.DEBUG, 'Local checksum: %s, Rucio checksum: %s' % (local_checksum, rucio_checksum))
-                        trace['clientState'] = FileDownloadState.FAIL_VALIDATE
-                        trace['stateReason'] = 'Checksum validation failed: Local checksum: %s, Rucio checksum: %s' % (local_checksum, rucio_checksum)
-                if not success:
-                    logger(logging.WARNING, '%sDownload attempt failed. Try %s/%s' % (log_prefix, attempt, retries))
-                    self._send_trace(trace)
 
-            protocol.close()
+                    start_time = time.time()
+
+                    try:
+                        protocol.get(pfn, temp_file_path, transfer_timeout=transfer_timeout)
+                        success = True
+                    except Exception as error:
+                        logger(logging.DEBUG, error)
+                        trace['clientState'] = FileDownloadState.FAILED
+                        trace['stateReason'] = str(error)
+
+                    end_time = time.time()
+
+                    if success and not item.get('merged_options', {}).get('ignore_checksum', False):
+                        verified, rucio_checksum, local_checksum = _verify_checksum(item, temp_file_path)
+                        if not verified:
+                            success = False
+                            os.unlink(temp_file_path)
+                            logger(logging.WARNING, '%sChecksum validation failed for file: %s' % (log_prefix, did_str))
+                            logger(logging.DEBUG, 'Local checksum: %s, Rucio checksum: %s' % (local_checksum, rucio_checksum))
+                            trace['clientState'] = FileDownloadState.FAIL_VALIDATE
+                            trace['stateReason'] = 'Checksum validation failed: Local checksum: %s, Rucio checksum: %s' % (local_checksum, rucio_checksum)
+                    if not success:
+                        logger(logging.WARNING, '%sDownload attempt with %s failed. Try %s/%s' % (log_prefix, candidate_impl or 'default implementation', attempt, retries))
+                        self._send_trace(trace)
+
+                protocol.close()
+                if success:
+                    break
 
         if not success:
             logger(logging.ERROR, '%sFailed to download file %s' % (log_prefix, did_str))

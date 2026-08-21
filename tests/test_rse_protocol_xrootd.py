@@ -12,8 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import os
-from contextlib import nullcontext
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -69,10 +70,45 @@ class _FileSystem:
 class _XRootDClient:
     def __init__(self, version='6.0.0'):
         self.__version__ = version
-        self.env = []
+        self.copy_process = None
+        self.filesystem_url = None
 
-    def EnvPutString(self, key, value):  # noqa: N802 - match XRootD client API
-        self.env.append((key, value))
+    def CopyProcess(self):  # noqa: N802 - match XRootD client API
+        self.copy_process = _CopyProcess()
+        return self.copy_process
+
+    def FileSystem(self, url):  # noqa: N802 - match XRootD client API
+        self.filesystem_url = url
+        return _FileSystem()
+
+
+class _CopyProcess:
+    def __init__(self):
+        self.job = None
+        self.run_token = None
+
+    def add_job(self, source, target, **kwargs):
+        self.job = (source, target, kwargs)
+
+    def prepare(self):
+        return _Status()
+
+    def run(self):
+        source = self.job[0]
+        token_path = parse_qs(urlsplit(source).query)['xrd.ztn'][0]
+        with open(token_path) as token_file:
+            self.run_token = token_file.read()
+        return _Status(), []
+
+
+def _protocol(auth_token=None, x509_proxy=None, credential_id='credential-id'):
+    protocol = xrootd.Default.__new__(xrootd.Default)
+    protocol.auth_token = auth_token
+    protocol._Default__fs = None
+    protocol._Default__token_file = None
+    protocol._Default__x509_proxy = x509_proxy
+    protocol._Default__credential_id = credential_id
+    return protocol
 
 
 def test_native_xrootd_requires_version_6_or_newer():
@@ -83,44 +119,95 @@ def test_native_xrootd_requires_version_6_or_newer():
     assert xrootd._is_supported_xrootd_version(_XRootDClient('v6.1.0'))
 
 
-def test_native_xrootd_clears_unexpanded_proxy_from_env(monkeypatch):
-    protocol = xrootd.Default.__new__(xrootd.Default)
+def test_native_xrootd_copy_keeps_token_out_of_parent_environment(monkeypatch):
+    protocol = _protocol(auth_token='transfer-token')
+    captured = {}
 
-    monkeypatch.setenv('X509_USER_PROXY', '$RUCIO_CLIENT_PROXY')
-
-    protocol._clear_unexpanded_x509_proxy()
-
-    assert 'X509_USER_PROXY' not in os.environ
-
-
-def test_native_xrootd_operation_restores_auth_environment(monkeypatch):
-    client = _XRootDClient()
-    protocol = xrootd.Default.__new__(xrootd.Default)
-    protocol.auth_token = 'new-token'
-
-    monkeypatch.setattr(xrootd, '_xrootd_client', client)
     monkeypatch.setenv('XrdSecPROTOCOL', 'gsi')
     monkeypatch.setenv('BEARER_TOKEN', 'old-token')
-    monkeypatch.delenv('X509_USER_PROXY', raising=False)
 
-    with protocol._xrootd_operation():
-        assert os.environ['XrdSecPROTOCOL'] == 'ztn'
-        assert os.environ['BEARER_TOKEN'] == 'new-token'
+    def run_worker(command, *, input, env, **kwargs):
+        captured['command'] = command
+        captured['request'] = json.loads(input)
+        captured['env'] = env
+        response = {
+            'result': {
+                'prepare_status': {'ok': True, 'message': '', 'code': 0, 'errNotFound': None},
+                'copy_status': {'ok': True, 'message': '', 'code': 0, 'errNotFound': None},
+                'copy_results': [],
+            },
+        }
+        return type('CompletedProcess', (), {
+            'returncode': 0,
+            'stdout': '{}{}'.format(xrootd._WORKER_RESULT_PREFIX, json.dumps(response)),
+            'stderr': '',
+        })()
 
+    monkeypatch.setattr(xrootd.subprocess, 'run', run_worker)
+
+    protocol._copy('root://example.com//source', '/tmp/destination')
+
+    source = captured['request']['source']
+    query = parse_qs(urlsplit(source).query)
+    token_path = query['xrd.ztn'][0]
+    assert query['xrd.wantprot'] == ['ztn']
+    assert query['xrdcl.intent'] == ['rucio-credential-id']
+    assert os.stat(token_path).st_mode & 0o777 == 0o600
+    assert captured['env']['BEARER_TOKEN_FILE'] == token_path
+    assert captured['env']['XrdSecPROTOCOL'] == 'ztn'
+    assert 'BEARER_TOKEN' not in captured['env']
     assert os.environ['XrdSecPROTOCOL'] == 'gsi'
     assert os.environ['BEARER_TOKEN'] == 'old-token'
-    assert 'X509_USER_PROXY' not in os.environ
-    assert ('XrdSecPROTOCOL', 'gsi') in client.env
-    assert ('BEARER_TOKEN', 'old-token') in client.env
-    assert ('X509_USER_PROXY', '') in client.env
+
+    protocol.close()
+    assert not os.path.exists(token_path)
+
+
+def test_native_xrootd_worker_runs_copy_with_url_token(monkeypatch):
+    client = _XRootDClient()
+    protocol = _protocol(auth_token='transfer-token')
+    source = protocol._authenticated_url('root://example.com//source')
+
+    monkeypatch.setattr(xrootd, '_xrootd_client', client)
+
+    result = xrootd._execute_isolated_request({
+        'action': 'copy',
+        'source': source,
+        'target': '/tmp/destination',
+        'cptimeout': 0,
+        'inittimeout': 600,
+    })
+
+    assert result['prepare_status']['ok']
+    assert result['copy_status']['ok']
+    assert client.copy_process.run_token == 'transfer-token'
+    protocol.close()
+
+
+def test_native_xrootd_pins_proxy_and_channel_identity_in_url(monkeypatch):
+    client = _XRootDClient()
+    protocol = _protocol(x509_proxy='/tmp/proxy', credential_id='proxy-identity')
+    protocol.scheme = 'root'
+    protocol.hostname = 'example.com'
+    protocol.port = '1094'
+
+    monkeypatch.setattr(xrootd, '_xrootd_client', client)
+
+    protocol._filesystem()
+
+    query = parse_qs(urlsplit(client.filesystem_url).query)
+    assert query == {
+        'xrd.gsiusrpxy': ['/tmp/proxy'],
+        'xrd.wantprot': ['gsi'],
+        'xrdcl.intent': ['rucio-proxy-identity'],
+    }
 
 
 def test_native_xrootd_stat_accepts_bytes_checksum(monkeypatch):
-    protocol = xrootd.Default.__new__(xrootd.Default)
+    protocol = _protocol()
     protocol.logger = lambda *args, **kwargs: None
     protocol.rse = {'verify_checksum': True}
     protocol._filesystem = lambda: _FileSystem()
-    protocol._xrootd_operation = nullcontext
 
     monkeypatch.setattr(xrootd, '_xrootd_flags', _Flags)
 
@@ -129,10 +216,9 @@ def test_native_xrootd_stat_accepts_bytes_checksum(monkeypatch):
 
 def test_native_xrootd_rename_ignores_existing_directory(monkeypatch):
     fs = _FileSystem()
-    protocol = xrootd.Default.__new__(xrootd.Default)
+    protocol = _protocol()
     protocol.logger = lambda *args, **kwargs: None
     protocol._filesystem = lambda: fs
-    protocol._xrootd_operation = nullcontext
     protocol.exists = lambda pfn: True
     protocol.pfn2path = lambda pfn: pfn
 
