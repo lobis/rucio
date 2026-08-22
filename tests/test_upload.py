@@ -29,7 +29,7 @@ from rucio.client.uploadclient import UploadClient
 from rucio.common.checksum import adler32, md5
 from rucio.common.config import config_add_section, config_set
 from rucio.common.constants import RseAttr
-from rucio.common.exception import InputValidationError, NoFilesUploaded, NotAllFilesUploaded, ResourceTemporaryUnavailable
+from rucio.common.exception import FileReplicaAlreadyExists, InputValidationError, NoFilesUploaded, NotAllFilesUploaded, ResourceTemporaryUnavailable, ServiceUnavailable
 from rucio.common.types import InternalScope
 from rucio.common.utils import execute, generate_uuid
 from rucio.core.rse import add_protocol, add_rse_attribute
@@ -64,18 +64,21 @@ def scope(vo, containerized_rses, test_scope, mock_scope):
         return str(mock_scope)
 
 
-def test_upload_item_selects_read_and_delete_implementations_independently():
+@pytest.mark.parametrize('sign_service', [None, 'mock-signing-service'])
+def test_upload_item_selects_read_and_delete_implementations_independently(sign_service):
     upload_client = UploadClient.__new__(UploadClient)
     upload_client.logger = MagicMock()
     upload_client.client = MagicMock()
     upload_client.auth_token = None
     write_impl = 'rucio.rse.protocols.xrootd.Default'
     write_protocol = MagicMock(renaming=True, overwrite=False)
+    write_protocol.attributes = {'scheme': 'root'}
     read_protocol = MagicMock()
     delete_protocol = MagicMock()
     pfn = 'root://example.com//file'
     write_protocol.lfns2pfns.return_value = {'mock:file': pfn}
     read_protocol.exists.side_effect = [False, True]
+    read_protocol.stat.return_value = {'filesize': '4'}
     delete_protocol.lfns2pfns.return_value = {'mock:file': pfn}
 
     protocols = {
@@ -95,21 +98,59 @@ def test_upload_item_selects_read_and_delete_implementations_independently():
             patch('rucio.client.uploadclient.retry', side_effect=immediate_retry):
         result = upload_client._upload_item(
             rse_settings={'rse': 'MOCK', 'verify_checksum': False},
-            rse_attributes={RseAttr.SKIP_UPLOAD_STAT: True},
+            rse_attributes={},
             lfn={'scope': 'mock', 'name': 'file', 'filename': 'file', 'filesize': 4},
             source_dir='/tmp',
             write_impl=write_impl,
-            sign_service='mock-signing-service',
+            force_scheme='xroot',
+            sign_service=sign_service,
         )
 
     assert result == pfn
     assert create.call_args_list[0].kwargs['impl'] == write_impl
     assert create.call_args_list[1].args[1] == 'read'
     assert create.call_args_list[1].kwargs['impl'] is None
+    assert create.call_args_list[1].kwargs['force_scheme'] == 'root'
     assert create.call_args_list[2].args[1] == 'delete'
     assert create.call_args_list[2].kwargs['impl'] is None
+    assert create.call_args_list[2].kwargs['force_scheme'] == 'root'
+    write_protocol.exists.assert_not_called()
+    write_protocol.stat.assert_not_called()
+    assert read_protocol.exists.call_count == 2
+    read_protocol.stat.assert_called_once_with('%s.rucio.upload' % pfn)
     delete_protocol.delete.assert_called_once_with('%s.rucio.upload' % pfn)
     write_protocol.put.assert_called_once()
+    read_protocol.close.assert_called_once()
+    write_protocol.close.assert_called_once()
+
+
+def test_upload_item_stops_after_existing_final_file():
+    upload_client = UploadClient.__new__(UploadClient)
+    upload_client.logger = MagicMock()
+    upload_client.client = MagicMock()
+    upload_client.auth_token = None
+    write_protocol = MagicMock(renaming=True, overwrite=False)
+    write_protocol.attributes = {'scheme': 'root'}
+    read_protocol = MagicMock()
+    pfn = 'root://example.com//file'
+    write_protocol.lfns2pfns.return_value = {'mock:file': pfn}
+    read_protocol.exists.return_value = True
+
+    def create_protocol(_rse_settings, operation, **_kwargs):
+        return {'write': write_protocol, 'read': read_protocol}[operation]
+
+    with patch.object(upload_client, '_create_protocol', side_effect=create_protocol):
+        with pytest.raises(FileReplicaAlreadyExists):
+            upload_client._upload_item(
+                rse_settings={'rse': 'MOCK', 'verify_checksum': False},
+                rse_attributes={},
+                lfn={'scope': 'mock', 'name': 'file', 'filename': 'file', 'filesize': 4},
+                source_dir='/tmp',
+            )
+
+    read_protocol.exists.assert_called_once_with(pfn)
+    read_protocol.close.assert_called_once()
+    write_protocol.close.assert_called_once()
 
 
 def test_upload_preferred_impl_only_requires_write_support():
@@ -132,6 +173,111 @@ def test_upload_preferred_impl_only_requires_write_support():
         assert upload_client.preferred_impl(rse_settings, 'wan') == write_impl
 
     protocol.connect.assert_called_once()
+    protocol.close.assert_called_once()
+
+
+def test_upload_without_configured_preference_does_not_probe_protocols():
+    upload_client = UploadClient.__new__(UploadClient)
+    upload_client.logger = MagicMock()
+    upload_client.auth_token = None
+
+    with patch('rucio.client.uploadclient.config_get', side_effect=RuntimeError('not configured')), \
+            patch('rucio.client.uploadclient.rsemgr.create_protocol') as create_protocol:
+        assert upload_client.preferred_impl({'protocols': []}, 'wan') is None
+
+    create_protocol.assert_not_called()
+
+
+def test_upload_preflight_falls_back_after_native_failure():
+    upload_client = UploadClient.__new__(UploadClient)
+    upload_client.logger = MagicMock()
+    upload_client.client = MagicMock(vo='def')
+    upload_client.auth_token = None
+    native_impl = 'rucio.rse.protocols.xrootd.Default'
+    fallback_impl = 'rucio.rse.protocols.gfal.Default'
+    native_protocol_attr = {'impl': native_impl, 'scheme': 'root'}
+    fallback_protocol_attr = {'impl': fallback_impl, 'scheme': 'root'}
+
+    with patch('rucio.client.uploadclient.rsemgr.select_protocol', return_value=native_protocol_attr), \
+            patch('rucio.client.uploadclient.rsemgr.get_protocols_ordered', return_value=[
+                native_protocol_attr,
+                fallback_protocol_attr,
+            ]), \
+            patch('rucio.client.uploadclient.rsemgr.exists', side_effect=[
+                ServiceUnavailable('native stat failed'),
+                False,
+            ]) as exists:
+        assert not upload_client._rse_exists(
+            {},
+            {'scope': 'mock', 'name': 'file'},
+            domain='wan',
+            scheme='root',
+            impl=None,
+        )
+
+    assert [call.kwargs['protocol_attr'] for call in exists.call_args_list] == [
+        native_protocol_attr,
+        fallback_protocol_attr,
+    ]
+    assert all(call.kwargs['impl'] is None for call in exists.call_args_list)
+
+
+def test_upload_preflight_preserves_exact_scheme_for_shared_implementation():
+    upload_client = UploadClient.__new__(UploadClient)
+    upload_client.logger = MagicMock()
+    upload_client.client = MagicMock(vo='def')
+    upload_client.auth_token = None
+    shared_impl = 'rucio.rse.protocols.gfal.Default'
+    root_protocol_attr = {'impl': shared_impl, 'scheme': 'root'}
+    https_protocol_attr = {'impl': shared_impl, 'scheme': 'https'}
+
+    with patch('rucio.client.uploadclient.rsemgr.select_protocol', return_value=root_protocol_attr), \
+            patch('rucio.client.uploadclient.rsemgr.get_protocols_ordered', return_value=[
+                root_protocol_attr,
+                https_protocol_attr,
+            ]), \
+            patch('rucio.client.uploadclient.rsemgr.exists', side_effect=[
+                ServiceUnavailable('root stat failed'),
+                False,
+            ]) as exists:
+        assert not upload_client._rse_exists(
+            {},
+            {'scope': 'mock', 'name': 'file'},
+            domain='wan',
+            scheme=None,
+            impl=None,
+        )
+
+    assert [call.kwargs['protocol_attr'] for call in exists.call_args_list] == [
+        root_protocol_attr,
+        https_protocol_attr,
+    ]
+
+
+def test_upload_protocol_creation_closes_failed_candidate():
+    upload_client = UploadClient.__new__(UploadClient)
+    upload_client.logger = MagicMock()
+    upload_client.auth_token = None
+    native_protocol_attr = {'impl': 'rucio.rse.protocols.xrootd.Default', 'scheme': 'root'}
+    fallback_protocol_attr = {'impl': 'rucio.rse.protocols.gfal.Default', 'scheme': 'root'}
+    native_protocol = MagicMock()
+    native_protocol.connect.side_effect = ServiceUnavailable('native connect failed')
+    fallback_protocol = MagicMock()
+
+    def create_protocol(*_args, protocol_attr=None, **_kwargs):
+        return native_protocol if protocol_attr is native_protocol_attr else fallback_protocol
+
+    with patch('rucio.client.uploadclient.rsemgr.select_protocol', return_value=native_protocol_attr), \
+            patch('rucio.client.uploadclient.rsemgr.get_protocols_ordered', return_value=[
+                native_protocol_attr,
+                fallback_protocol_attr,
+            ]), \
+            patch('rucio.client.uploadclient.rsemgr.create_protocol', side_effect=create_protocol):
+        result = upload_client._create_protocol({}, 'read', force_scheme='root')
+
+    assert result is fallback_protocol
+    native_protocol.close.assert_called_once()
+    fallback_protocol.close.assert_not_called()
 
 
 @pytest.mark.parametrize("file_config_mock", [

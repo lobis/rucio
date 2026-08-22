@@ -112,6 +112,61 @@ def test_download_falls_back_after_preferred_transfer_failure(tmp_path):
         assert downloaded.read() == b'data'
 
 
+def test_download_falls_back_when_preferred_probe_failed(tmp_path):
+    download_client = DownloadClient.__new__(DownloadClient)
+    download_client.logger = MagicMock()
+    download_client.client = MagicMock(vo='def', host='localhost', user_agent='pytest')
+    download_client.check_pcache = False
+    download_client.auth_token = None
+    download_client.is_human_readable = False
+    native_impl = 'rucio.rse.protocols.xrootd.Default'
+    fallback_impl = 'rucio.rse.protocols.gfal.Default'
+    native_protocol = MagicMock()
+    native_protocol.connect.side_effect = RucioException('native connect failed')
+    fallback_protocol = MagicMock()
+
+    def successful_get(_pfn, destination, **_kwargs):
+        with open(destination, 'wb') as output:
+            output.write(b'data')
+
+    fallback_protocol.get.side_effect = successful_get
+    dest_file_path = str(tmp_path / 'downloaded')
+    item = {
+        'scope': 'mock',
+        'name': 'file',
+        'bytes': 4,
+        'sources': [{'pfn': 'root://example.com//file', 'rse': 'MOCK'}],
+        'dest_file_paths': [dest_file_path],
+        'temp_file_path': str(tmp_path / 'download.part'),
+        'preferred_impl': None,
+        'merged_options': {'ignore_checksum': True},
+    }
+
+    def create_protocol(*_args, impl=None, **_kwargs):
+        if impl == native_impl:
+            return native_protocol
+        if impl == fallback_impl:
+            return fallback_protocol
+        raise AssertionError('Unexpected implementation: %s' % impl)
+
+    with patch.object(download_client, '_compute_actual_transfer_timeout', return_value=None), \
+            patch.object(download_client, '_send_trace'), \
+            patch('rucio.client.downloadclient.rsemgr.get_rse_info', return_value={}), \
+            patch('rucio.client.downloadclient.rsemgr.select_protocol', return_value={'impl': native_impl}), \
+            patch('rucio.client.downloadclient.rsemgr.get_protocols_ordered', return_value=[
+                {'impl': native_impl},
+                {'impl': fallback_impl},
+            ]), \
+            patch('rucio.client.downloadclient.rsemgr.create_protocol', side_effect=create_protocol):
+        result = download_client._download_item(item, {}, None)
+
+    assert result['clientState'] == 'DONE'
+    native_protocol.get.assert_not_called()
+    native_protocol.close.assert_called_once()
+    fallback_protocol.get.assert_called_once()
+    fallback_protocol.close.assert_called_once()
+
+
 def test_download_without_base_dir(rse_factory, did_factory, download_client):
     scope = str(did_factory.default_scope)
     rse, _ = rse_factory.make_posix_rse()

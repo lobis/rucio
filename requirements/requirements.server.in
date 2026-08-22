@@ -40,3 +40,4 @@ elasticsearch==8.15.1                                        # elasticsearch (me
 libtorrent==2.0.13                                          # Support for the bittorrent transfertool
 qbittorrent-api==2026.5.2                                   # qBittorrent plugin for the bittorrent tranfsertool
 rich==15.0.0                                                # For Rich terminal display
+xrootd==6.1.1                                               # xrootd_extras; Native XRootD Python bindings
