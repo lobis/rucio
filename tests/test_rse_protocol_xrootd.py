@@ -109,6 +109,9 @@ class _CopyProcess:
 def _protocol(auth_token=None, x509_proxy=None, credential_id='credential-id'):
     protocol = object.__new__(xrootd.Default)
     protocol.auth_token = auth_token
+    protocol.scheme = 'root'
+    protocol.hostname = 'example.com'
+    protocol.port = '1094'
     protocol._Default__auth_mode = 'ztn' if auth_token else 'gsi'
     protocol._Default__token_file = None
     protocol._Default__proxy_file = None
@@ -468,6 +471,19 @@ def test_native_xrootd_invalid_explicit_proxy_does_not_fall_through(monkeypatch,
     monkeypatch.setenv('X509_USER_PROXY', str(ambient_proxy))
 
     assert protocol._valid_x509_proxy() is None
+
+
+def test_native_xrootd_unset_config_proxy_uses_default_proxy(monkeypatch, tmp_path):
+    default_proxy = tmp_path / 'default-proxy'
+    default_proxy.write_text('default identity')
+    protocol = _protocol()
+    protocol._default_x509_proxy = lambda: str(default_proxy)
+
+    monkeypatch.delenv('RUCIO_CLIENT_PROXY', raising=False)
+    monkeypatch.delenv('X509_USER_PROXY', raising=False)
+    monkeypatch.setattr(xrootd, 'config_get', lambda *_args, **_kwargs: '$X509_USER_PROXY')
+
+    assert protocol._valid_x509_proxy() == str(default_proxy)
 
 
 def test_native_xrootd_status_failures_use_public_exception_contract():

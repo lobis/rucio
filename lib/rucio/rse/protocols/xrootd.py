@@ -300,9 +300,16 @@ class Default(protocol.RSEProtocol):
 
     def _configured_x509_proxy(self) -> str | None:
         try:
-            return config_get('client', 'client_x509_proxy', default=None, raise_exception=False)
+            configured_proxy = config_get('client', 'client_x509_proxy', default=None, raise_exception=False)
         except Exception:
             return None
+        if configured_proxy in ('$X509_USER_PROXY', '${X509_USER_PROXY}'):
+            # The standard client configuration commonly contains this alias
+            # even when the variable is unset. Return the environment value
+            # directly so an unset alias permits default-proxy lookup while an
+            # explicitly invalid value still fails closed.
+            return os.environ.get('X509_USER_PROXY')
+        return configured_proxy
 
     @staticmethod
     def _default_x509_proxy() -> str | None:
