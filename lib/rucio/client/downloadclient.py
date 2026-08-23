@@ -781,6 +781,34 @@ class DownloadClient:
             self._send_trace(trace)
             return item
 
+        preferred_impl = item.get('preferred_impl')
+        if preferred_impl:
+            rse_settings_by_name = {}
+
+            def supports_preferred_impl(source):
+                rse_name = source['rse']
+                try:
+                    rse_settings = rse_settings_by_name[rse_name]
+                except KeyError:
+                    try:
+                        rse_settings = rsemgr.get_rse_info(rse_name, vo=self.client.vo)
+                    except RucioException:
+                        rse_settings = None
+                    rse_settings_by_name[rse_name] = rse_settings
+
+                if rse_settings is None:
+                    return False
+                scheme = source['pfn'].split(':', 1)[0]
+                return any(
+                    protocol['scheme'] == scheme and protocol['impl'] == preferred_impl
+                    for protocol in rse_settings['protocols']
+                )
+
+            # The preferred implementation is meaningful only for PFNs whose
+            # scheme is configured with that implementation. Keep the server's
+            # source order within both groups so all existing fallbacks remain.
+            sources = sorted(sources, key=lambda source: not supports_preferred_impl(source))
+
         # checking Pcache
         storage_prefix = None
         if pcache:

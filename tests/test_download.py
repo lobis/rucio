@@ -112,6 +112,56 @@ def test_download_falls_back_after_preferred_transfer_failure(tmp_path):
         assert downloaded.read() == b'data'
 
 
+def test_download_preferred_impl_prioritizes_compatible_pfn(tmp_path):
+    download_client = DownloadClient.__new__(DownloadClient)
+    download_client.logger = MagicMock()
+    download_client.client = MagicMock(vo='def', host='localhost', user_agent='pytest')
+    download_client.check_pcache = False
+    download_client.auth_token = None
+    download_client.is_human_readable = False
+    preferred_impl = 'rucio.rse.protocols.xrootd.Default'
+    preferred_protocol = MagicMock()
+
+    def successful_get(_pfn, destination, **_kwargs):
+        with open(destination, 'wb') as output:
+            output.write(b'data')
+
+    preferred_protocol.get.side_effect = successful_get
+    root_pfn = 'root://example.com//file'
+    item = {
+        'scope': 'mock',
+        'name': 'file',
+        'bytes': 4,
+        'sources': [
+            {'pfn': 'scp://example.com/file', 'rse': 'MOCK'},
+            {'pfn': root_pfn, 'rse': 'MOCK'},
+        ],
+        'dest_file_paths': [str(tmp_path / 'downloaded')],
+        'temp_file_path': str(tmp_path / 'download.part'),
+        'preferred_impl': preferred_impl,
+        'merged_options': {'ignore_checksum': True},
+    }
+    rse_settings = {
+        'protocols': [
+            {'scheme': 'scp', 'impl': 'rucio.rse.protocols.posix.Default'},
+            {'scheme': 'root', 'impl': preferred_impl},
+        ],
+    }
+
+    with patch.object(download_client, '_compute_actual_transfer_timeout', return_value=None), \
+            patch.object(download_client, '_send_trace'), \
+            patch('rucio.client.downloadclient.rsemgr.get_rse_info', return_value=rse_settings), \
+            patch('rucio.client.downloadclient.rsemgr.get_protocols_ordered', return_value=[
+                {'impl': preferred_impl},
+            ]), \
+            patch('rucio.client.downloadclient.rsemgr.create_protocol', return_value=preferred_protocol):
+        result = download_client._download_item(item, {}, None)
+
+    assert result['clientState'] == 'DONE'
+    assert preferred_protocol.get.call_args.args[0] == root_pfn
+    preferred_protocol.close.assert_called_once()
+
+
 def test_download_falls_back_when_preferred_probe_failed(tmp_path):
     download_client = DownloadClient.__new__(DownloadClient)
     download_client.logger = MagicMock()
