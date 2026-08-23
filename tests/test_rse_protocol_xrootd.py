@@ -171,6 +171,32 @@ def test_rsemanager_falls_back_from_missing_optional_binding(monkeypatch):
         rsemanager.create_protocol(rse_settings, 'read', scheme='root', impl=native_impl)
 
 
+def test_xrootd_url_operations_do_not_require_optional_binding(monkeypatch):
+    protocol = {
+        'scheme': 'root',
+        'hostname': 'example.com',
+        'port': 1094,
+        'prefix': '/rucio/',
+        'impl': 'rucio.rse.protocols.xrootd.Default',
+        'domains': {'wan': {'read': 1, 'write': 1, 'delete': 1}},
+    }
+    rse_settings = {
+        'rse': 'MOCK',
+        'deterministic': True,
+        'protocols': [protocol],
+    }
+    pfn = 'root://example.com:1094/rucio/mock/file'
+
+    monkeypatch.setattr(xrootd, '_xrootd_client', None)
+
+    assert rsemanager.lfns2pfns(
+        rse_settings,
+        {'scope': 'mock', 'name': 'file', 'path': 'mock/file'},
+        scheme='root',
+    ) == {'mock:file': pfn}
+    assert rsemanager.parse_pfns(rse_settings, [pfn])[pfn]['name'] == 'file'
+
+
 @pytest.mark.parametrize('operation_error', [None, exception.ServiceUnavailable('stat failed')])
 def test_rsemanager_exists_always_closes_protocol(monkeypatch, operation_error):
     protocol = MagicMock()
@@ -368,6 +394,64 @@ def test_native_xrootd_gsi_worker_removes_ambient_credentials(monkeypatch, tmp_p
     assert not os.path.exists(worker_home)
 
 
+def test_native_xrootd_gsi_worker_preserves_explicit_cert_key(monkeypatch, tmp_path):
+    cert = tmp_path / 'cert.pem'
+    key = tmp_path / 'key.pem'
+    cert.write_text('certificate identity')
+    key.write_text('private key identity')
+    monkeypatch.setenv('X509_USER_CERT', str(cert))
+    monkeypatch.setenv('X509_USER_KEY', str(key))
+    captured = {}
+    process = MagicMock()
+    process.poll.return_value = None
+    process.wait.return_value = 0
+
+    def start_worker(_command, *, env, **_kwargs):
+        captured['env'] = env
+        return process
+
+    monkeypatch.setattr(xrootd.subprocess, 'Popen', start_worker)
+    worker = xrootd._CredentialWorker('/trusted/site-packages', 'gsi')
+    try:
+        worker._start()
+        assert Path(captured['env']['X509_USER_CERT']).read_text() == cert.read_text()
+        assert Path(captured['env']['X509_USER_KEY']).read_text() == key.read_text()
+        assert 'X509_USER_PROXY' not in captured['env']
+    finally:
+        worker.close()
+
+
+def test_native_xrootd_pins_explicit_cert_key(monkeypatch, tmp_path):
+    cert = tmp_path / 'cert.pem'
+    key = tmp_path / 'key.pem'
+    cert.write_text('certificate identity')
+    key.write_text('private key identity')
+    monkeypatch.setenv('X509_USER_CERT', str(cert))
+    monkeypatch.setenv('X509_USER_KEY', str(key))
+    monkeypatch.delenv('RUCIO_CLIENT_PROXY', raising=False)
+    monkeypatch.delenv('X509_USER_PROXY', raising=False)
+    protocol = _protocol()
+    protocol._configured_x509_proxy = lambda: None
+    protocol._default_x509_proxy = lambda: None
+
+    selected_cert, selected_key = protocol._valid_x509_cert_key()
+    pinned_cert = protocol._snapshot_x509_cert(selected_cert)
+    pinned_key = protocol._snapshot_x509_key(selected_key)
+    protocol._Default__x509_proxy = None
+    protocol._Default__x509_cert = pinned_cert
+    protocol._Default__x509_key = pinned_key
+    protocol._Default__credential_id = protocol._gsi_credential_id(None, pinned_cert, pinned_key)
+
+    query = parse_qs(urlsplit(protocol._authenticated_url('root://example.com:1094')).query)
+    assert Path(query['xrd.gsiusrcrt'][0]).read_text() == cert.read_text()
+    assert Path(query['xrd.gsiusrkey'][0]).read_text() == key.read_text()
+    assert 'xrd.gsiusrpxy' not in query
+
+    protocol.close()
+    assert not Path(pinned_cert).exists()
+    assert not Path(pinned_key).exists()
+
+
 def test_native_xrootd_scopes_workers_to_protocol_credentials(monkeypatch):
     workers = []
 
@@ -473,6 +557,21 @@ def test_native_xrootd_invalid_explicit_proxy_does_not_fall_through(monkeypatch,
     assert protocol._valid_x509_proxy() is None
 
 
+@pytest.mark.parametrize('variable', ['RUCIO_CLIENT_PROXY', 'X509_USER_PROXY'])
+def test_native_xrootd_empty_explicit_proxy_does_not_fall_through(monkeypatch, tmp_path, variable):
+    fallback_proxy = tmp_path / 'fallback-proxy'
+    fallback_proxy.write_text('different identity')
+    protocol = _protocol()
+    protocol._configured_x509_proxy = lambda: str(fallback_proxy) if variable == 'RUCIO_CLIENT_PROXY' else None
+    protocol._default_x509_proxy = lambda: str(fallback_proxy)
+
+    monkeypatch.delenv('RUCIO_CLIENT_PROXY', raising=False)
+    monkeypatch.delenv('X509_USER_PROXY', raising=False)
+    monkeypatch.setenv(variable, '')
+
+    assert protocol._valid_x509_proxy() is None
+
+
 def test_native_xrootd_unset_config_proxy_uses_default_proxy(monkeypatch, tmp_path):
     default_proxy = tmp_path / 'default-proxy'
     default_proxy.write_text('default identity')
@@ -484,6 +583,29 @@ def test_native_xrootd_unset_config_proxy_uses_default_proxy(monkeypatch, tmp_pa
     monkeypatch.setattr(xrootd, 'config_get', lambda *_args, **_kwargs: '$X509_USER_PROXY')
 
     assert protocol._valid_x509_proxy() == str(default_proxy)
+
+
+def test_native_xrootd_close_cleans_credentials_after_worker_failure():
+    protocol = _protocol()
+    worker = MagicMock()
+    worker.close.side_effect = RuntimeError('worker shutdown failed')
+    token_file = MagicMock()
+    proxy_file = MagicMock()
+    cert_file = MagicMock()
+    key_file = MagicMock()
+    protocol._Default__worker = worker
+    protocol._Default__token_file = token_file
+    protocol._Default__proxy_file = proxy_file
+    protocol._Default__cert_file = cert_file
+    protocol._Default__key_file = key_file
+
+    with pytest.raises(RuntimeError, match='worker shutdown failed'):
+        protocol.close()
+
+    token_file.close.assert_called_once()
+    proxy_file.close.assert_called_once()
+    cert_file.close.assert_called_once()
+    key_file.close.assert_called_once()
 
 
 def test_native_xrootd_status_failures_use_public_exception_contract():

@@ -54,9 +54,21 @@ class _CredentialWorker:
             auth_mode: str,
             token_path: str | None = None,
             proxy_path: str | None = None,
+            cert_path: str | None = None,
+            key_path: str | None = None,
     ) -> None:
         self._token_path = token_path
         self._proxy_path = proxy_path
+        self._cert_path = cert_path
+        self._key_path = key_path
+        if auth_mode == 'gsi' and proxy_path is None and cert_path is None and key_path is None:
+            # Direct worker users retain explicitly selected certificate/key
+            # authentication. Protocol instances pass immutable snapshots here.
+            selected_cert = os.environ.get('X509_USER_CERT')
+            selected_key = os.environ.get('X509_USER_KEY')
+            if selected_cert and selected_key and os.path.isfile(selected_cert) and os.path.isfile(selected_key):
+                self._cert_path = selected_cert
+                self._key_path = selected_key
         self._module_path = module_path
         self._auth_mode = auth_mode
         self._home = TemporaryDirectory(prefix='rucio-xrootd-home-')
@@ -130,8 +142,13 @@ class _CredentialWorker:
             if self._token_path is None:
                 raise exception.ServiceUnavailable('Native XRootD bearer worker has no token')
             env['BEARER_TOKEN_FILE'] = self._token_path
+        elif self._proxy_path is not None:
+            env['X509_USER_PROXY'] = self._proxy_path
+        elif self._cert_path is not None and self._key_path is not None:
+            env['X509_USER_CERT'] = self._cert_path
+            env['X509_USER_KEY'] = self._key_path
         else:
-            env['X509_USER_PROXY'] = self._proxy_path or os.devnull
+            env['X509_USER_PROXY'] = os.devnull
 
         worker_path = str(Path(__file__).with_name('xrootd_worker.py').resolve())
         self._process = subprocess.Popen(  # noqa: S603 - fixed interpreter and trusted absolute script
@@ -242,7 +259,6 @@ class Default(protocol.RSEProtocol):
 
             :param props: Properties derived from the RSE Repository
         """
-        _client()
         super(Default, self).__init__(protocol_attr, rse_settings, logger=logger)
 
         self.scheme = self.attributes['scheme']
@@ -251,17 +267,27 @@ class Default(protocol.RSEProtocol):
         self.logger = logger
         self.__token_file: Any | None = None
         self.__proxy_file: Any | None = None
+        self.__cert_file: Any | None = None
+        self.__key_file: Any | None = None
         self.__worker_lock = threading.Lock()
         self.__auth_mode = 'ztn' if self.auth_token else 'gsi'
         selected_proxy = None if self.__auth_mode == 'ztn' else self._valid_x509_proxy()
         self.__x509_proxy = self._snapshot_x509_proxy(selected_proxy)
-        self.__credential_id = self._gsi_credential_id(self.__x509_proxy)
-        self.__worker = _CredentialWorker(
-            _xrootd_module_path(),
-            self.__auth_mode,
-            token_path=self._token_path() if self.__auth_mode == 'ztn' else None,
-            proxy_path=self.__x509_proxy,
+        selected_cert, selected_key = (None, None)
+        if self.__auth_mode == 'gsi' and selected_proxy is None:
+            selected_cert, selected_key = self._valid_x509_cert_key()
+        self.__x509_cert = self._snapshot_x509_cert(selected_cert)
+        self.__x509_key = self._snapshot_x509_key(selected_key)
+        self.__credential_id = self._gsi_credential_id(
+            self.__x509_proxy,
+            self.__x509_cert,
+            self.__x509_key,
         )
+        self.__worker: _CredentialWorker | None = None
+
+    def check_dependencies(self) -> None:
+        """Validate the optional native transport without affecting URL-only operations."""
+        _client()
 
     @property
     def _endpoint(self) -> str:
@@ -286,17 +312,35 @@ class Default(protocol.RSEProtocol):
         return response
 
     def _valid_x509_proxy(self) -> str | None:
-        for proxy in (
-            os.environ.get('RUCIO_CLIENT_PROXY'),
-            self._configured_x509_proxy(),
-            os.environ.get('X509_USER_PROXY'),
-            self._default_x509_proxy(),
-        ):
-            if proxy:
-                # An explicitly selected but unusable credential must not fall
-                # through to a lower-priority proxy belonging to another user.
-                return self._expand_x509_proxy(proxy)
-        return None
+        # Presence is significant: an explicitly empty or unusable credential
+        # must fail closed instead of selecting a lower-priority identity.
+        if 'RUCIO_CLIENT_PROXY' in os.environ:
+            return self._expand_x509_proxy(os.environ['RUCIO_CLIENT_PROXY'])
+
+        configured_proxy = self._configured_x509_proxy()
+        if configured_proxy is not None:
+            return self._expand_x509_proxy(configured_proxy)
+
+        if 'X509_USER_PROXY' in os.environ:
+            return self._expand_x509_proxy(os.environ['X509_USER_PROXY'])
+
+        if 'X509_USER_CERT' in os.environ or 'X509_USER_KEY' in os.environ:
+            return None
+
+        return self._expand_x509_proxy(self._default_x509_proxy())
+
+    def _valid_x509_cert_key(self) -> tuple[str | None, str | None]:
+        if 'RUCIO_CLIENT_PROXY' in os.environ or 'X509_USER_PROXY' in os.environ:
+            return None, None
+        if self._configured_x509_proxy() is not None:
+            return None, None
+        if 'X509_USER_CERT' not in os.environ and 'X509_USER_KEY' not in os.environ:
+            return None, None
+        cert = self._expand_x509_proxy(os.environ.get('X509_USER_CERT'))
+        key = self._expand_x509_proxy(os.environ.get('X509_USER_KEY'))
+        if cert is None or key is None:
+            return None, None
+        return cert, key
 
     def _configured_x509_proxy(self) -> str | None:
         try:
@@ -329,35 +373,62 @@ class Default(protocol.RSEProtocol):
         return None
 
     @staticmethod
-    def _gsi_credential_id(proxy: str | None) -> str:
+    def _gsi_credential_id(
+            proxy: str | None,
+            cert: str | None = None,
+            key: str | None = None,
+    ) -> str:
         digest = hashlib.sha256()
-        if proxy:
+        selected_credentials = (
+            ('proxy', proxy),
+            ('cert', cert),
+            ('key', key),
+        )
+        for label, credential_path in selected_credentials:
+            if credential_path is None:
+                continue
+            digest.update(label.encode())
             try:
-                with open(proxy, 'rb') as proxy_file:
-                    for chunk in iter(lambda: proxy_file.read(8192), b''):
+                with open(credential_path, 'rb') as credential_file:
+                    for chunk in iter(lambda: credential_file.read(8192), b''):
                         digest.update(chunk)
             except OSError:
-                digest.update(os.path.abspath(proxy).encode())
-        else:
-            digest.update(b'no-proxy')
+                digest.update(os.path.abspath(credential_path).encode())
+        if all(path is None for _, path in selected_credentials):
+            digest.update(b'no-gsi-credential')
         return digest.hexdigest()
 
     def _snapshot_x509_proxy(self, proxy: str | None) -> str | None:
-        if proxy is None:
+        snapshot = self._snapshot_x509_credential(proxy, 'proxy')
+        self.__proxy_file = snapshot
+        return snapshot.name if snapshot is not None else None
+
+    def _snapshot_x509_cert(self, cert: str | None) -> str | None:
+        snapshot = self._snapshot_x509_credential(cert, 'cert')
+        self.__cert_file = snapshot
+        return snapshot.name if snapshot is not None else None
+
+    def _snapshot_x509_key(self, key: str | None) -> str | None:
+        snapshot = self._snapshot_x509_credential(key, 'key')
+        self.__key_file = snapshot
+        return snapshot.name if snapshot is not None else None
+
+    @staticmethod
+    def _snapshot_x509_credential(credential: str | None, kind: str) -> Any | None:
+        if credential is None:
             return None
-        proxy_file = None
+        credential_file = None
         try:
-            proxy_file = NamedTemporaryFile(mode='w+b', prefix='rucio-xrootd-proxy-')
-            with open(proxy, 'rb') as source_proxy:
-                for chunk in iter(lambda: source_proxy.read(8192), b''):
-                    proxy_file.write(chunk)
-            proxy_file.flush()
+            credential_file = NamedTemporaryFile(mode='w+b', prefix='rucio-xrootd-{}-'.format(kind))
+            with open(credential, 'rb') as source_credential:
+                for chunk in iter(lambda: source_credential.read(8192), b''):
+                    credential_file.write(chunk)
+            credential_file.flush()
         except OSError:
-            if proxy_file is not None:
-                proxy_file.close()
+            if credential_file is not None:
+                credential_file.close()
             return None
-        self.__proxy_file = proxy_file
-        return proxy_file.name
+        return credential_file
 
     def _token_path(self) -> str:
         if self.__token_file is None:
@@ -384,11 +455,22 @@ class Default(protocol.RSEProtocol):
             # its own process-local channel map and immutable proxy snapshot.
             query['xrdcl.intent'] = 'rucio-{}'.format(self.__credential_id)
             query['xrd.wantprot'] = 'gsi'
-            query['xrd.gsiusrpxy'] = self.__x509_proxy or os.devnull
-            # Prevent XRootD from falling back to ~/.globus cert/key if the
-            # selected proxy is absent or becomes unreadable.
-            query['xrd.gsiusrcrt'] = os.devnull
-            query['xrd.gsiusrkey'] = os.devnull
+            x509_proxy = getattr(self, '_Default__x509_proxy', None)
+            x509_cert = getattr(self, '_Default__x509_cert', None)
+            x509_key = getattr(self, '_Default__x509_key', None)
+            if x509_proxy is not None:
+                query['xrd.gsiusrpxy'] = x509_proxy
+                query['xrd.gsiusrcrt'] = os.devnull
+                query['xrd.gsiusrkey'] = os.devnull
+            elif x509_cert is not None and x509_key is not None:
+                query['xrd.gsiusrcrt'] = x509_cert
+                query['xrd.gsiusrkey'] = x509_key
+            else:
+                # Prevent XRootD from falling back to another identity in the
+                # worker's isolated home directory.
+                query['xrd.gsiusrpxy'] = os.devnull
+                query['xrd.gsiusrcrt'] = os.devnull
+                query['xrd.gsiusrkey'] = os.devnull
         return urlunsplit(parsed._replace(path=parsed.path or '/', query=urlencode(query, safe='/')))
 
     def _run_isolated(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -401,12 +483,16 @@ class Default(protocol.RSEProtocol):
             worker = getattr(self, '_Default__worker', None)
             if worker is None:
                 x509_proxy = getattr(self, '_Default__x509_proxy', None)
+                x509_cert = getattr(self, '_Default__x509_cert', None)
+                x509_key = getattr(self, '_Default__x509_key', None)
                 auth_mode = getattr(self, '_Default__auth_mode', 'ztn' if self.auth_token else 'gsi')
                 worker = _CredentialWorker(
                     _xrootd_module_path(),
                     auth_mode,
                     token_path=self._token_path() if auth_mode == 'ztn' else None,
                     proxy_path=x509_proxy,
+                    cert_path=x509_cert,
+                    key_path=x509_key,
                 )
                 self.__worker = worker
         return worker.request(request)
@@ -646,17 +732,32 @@ class Default(protocol.RSEProtocol):
                 self._close_resources()
 
     def _close_resources(self) -> None:
+        close_error = None
         worker = getattr(self, '_Default__worker', None)
+        self.__worker = None
         if worker is not None:
-            worker.close()
-        token_file = getattr(self, '_Default__token_file', None)
-        if token_file is not None:
-            token_file.close()
-            self.__token_file = None
-        proxy_file = getattr(self, '_Default__proxy_file', None)
-        if proxy_file is not None:
-            proxy_file.close()
-            self.__proxy_file = None
+            try:
+                worker.close()
+            except Exception as error:
+                close_error = error
+
+        for attribute in (
+            '_Default__token_file',
+            '_Default__proxy_file',
+            '_Default__cert_file',
+            '_Default__key_file',
+        ):
+            credential_file = getattr(self, attribute, None)
+            setattr(self, attribute, None)
+            if credential_file is not None:
+                try:
+                    credential_file.close()
+                except Exception as error:
+                    if close_error is None:
+                        close_error = error
+
+        if close_error is not None:
+            raise close_error
 
     def __del__(self) -> None:
         try:

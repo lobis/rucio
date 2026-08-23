@@ -393,6 +393,7 @@ class UploadClient:
         registered_dataset_dids = set()
         num_succeeded = 0
         summary = []
+        preferred_impl_cache: dict[tuple[str, str], Optional[str]] = {}
         for file in files:
             basename = file['basename']
             logger(logging.INFO, 'Preparing upload for file %s' % basename)
@@ -443,7 +444,10 @@ class UploadClient:
 
             preferred_impl = None
             if not impl and not force_scheme:
-                preferred_impl = self.preferred_impl(rse_settings, domain)
+                preference_key = (rse, domain)
+                if preference_key not in preferred_impl_cache:
+                    preferred_impl_cache[preference_key] = self.preferred_impl(rse_settings, domain)
+                preferred_impl = preferred_impl_cache[preference_key]
 
             if not no_register and not register_after_upload:
                 self._register_file(file,
@@ -1031,7 +1035,7 @@ class UploadClient:
             for all operations (if any).
         write_impl
             Write implementation selected by the upload fallback loop. Read and
-            delete operations remain independently selected for the same scheme.
+            delete operations remain independently selected and may use other schemes.
         force_pfn
             If provided, forces the use of this PFN for the file location on the storage
             (use with care since it can lead to "dark" data).
@@ -1062,22 +1066,14 @@ class UploadClient:
 
         logger = self.logger
 
-        # Construct independent protocols for write-side and read-side operations.
+        # Construct the selected write protocol first. Read and delete protocols
+        # are selected independently and generate PFNs from their own records.
         protocol_write = self._create_protocol(rse_settings,
                                                'write',
                                                force_scheme=force_scheme,
                                                domain=domain,
                                                impl=write_impl or impl)
         selected_scheme = protocol_write.attributes['scheme']
-        try:
-            protocol_read = self._create_protocol(rse_settings,
-                                                  'read',
-                                                  force_scheme=selected_scheme,
-                                                  domain=domain,
-                                                  impl=impl)
-        except Exception:
-            self._close_protocols(protocol_write)
-            raise
 
         base_name = lfn.get('filename', lfn['name'])
         name = lfn.get('name', base_name)
@@ -1089,10 +1085,8 @@ class UploadClient:
 
         # Getting pfn
         pfn = None
-        read_pfn = pfn
         try:
             pfn = list(protocol_write.lfns2pfns(make_valid_did(lfn)).values())[0]
-            read_pfn = pfn
             logger(logging.DEBUG, 'The PFN created from the LFN: {}'.format(pfn))
         except Exception as error:
             logger(logging.WARNING, 'Failed to create PFN for LFN: %s' % lfn)
@@ -1102,10 +1096,32 @@ class UploadClient:
             logger(logging.DEBUG, 'The given PFN is used: {}'.format(pfn))
 
         try:
+            protocol_read = self._create_protocol(
+                rse_settings,
+                'read',
+                force_scheme=selected_scheme if force_pfn else None,
+                domain=domain,
+                impl=impl,
+            )
+        except Exception:
+            self._close_protocols(protocol_write)
+            raise
+
+        try:
+            if force_pfn:
+                read_pfn = force_pfn
+            else:
+                read_pfn = list(protocol_read.lfns2pfns(make_valid_did(lfn)).values())[0]
+                logger(logging.DEBUG, 'The read PFN created from the LFN: %s', read_pfn)
+        except Exception:
+            self._close_protocols(protocol_read, protocol_write)
+            raise
+
+        try:
             # Auth. mostly for object stores
-            read_pfn = pfn
+            if sign_service and read_pfn is not None:
+                read_pfn = self.client.get_signed_url(rse_settings['rse'], sign_service, 'read', read_pfn)
             if sign_service and pfn is not None:
-                read_pfn = self.client.get_signed_url(rse_settings['rse'], sign_service, 'read', pfn)
                 pfn = self.client.get_signed_url(rse_settings['rse'], sign_service, 'write', pfn)
 
             # Create a name of tmp file if the renaming operation is supported
@@ -1133,10 +1149,11 @@ class UploadClient:
                 # Construct protocol for delete operation.
                 protocol_delete = self._create_protocol(rse_settings,
                                                         'delete',
-                                                        force_scheme=selected_scheme,
+                                                        force_scheme=selected_scheme if force_pfn else None,
                                                         domain=domain,
                                                         impl=impl)
-                delete_pfn = '%s.rucio.upload' % list(protocol_delete.lfns2pfns(make_valid_did(lfn)).values())[0]
+                delete_pfn = force_pfn or list(protocol_delete.lfns2pfns(make_valid_did(lfn)).values())[0]
+                delete_pfn = '%s.rucio.upload' % delete_pfn
                 if sign_service:
                     delete_pfn = self.client.get_signed_url(rse_settings['rse'], sign_service, 'delete', delete_pfn)
                 protocol_delete.delete(delete_pfn)
@@ -1156,10 +1173,10 @@ class UploadClient:
                 # Construct protocol for delete operation.
                 protocol_delete = self._create_protocol(rse_settings,
                                                         'delete',
-                                                        force_scheme=selected_scheme,
+                                                        force_scheme=selected_scheme if force_pfn else None,
                                                         domain=domain,
                                                         impl=impl)
-                delete_pfn = '%s' % list(protocol_delete.lfns2pfns(make_valid_did(lfn)).values())[0]
+                delete_pfn = force_pfn or list(protocol_delete.lfns2pfns(make_valid_did(lfn)).values())[0]
                 if sign_service:
                     delete_pfn = self.client.get_signed_url(rse_settings['rse'], sign_service, 'delete', delete_pfn)
                 protocol_delete.delete(delete_pfn)

@@ -192,7 +192,8 @@ def create_protocol(
         auth_token: Optional[str] = None,
         protocol_attr: Optional[types.RSEProtocolDict] = None,
         logger: types.LoggerFunction = logging.log,
-        impl: Optional[str] = None
+        impl: Optional[str] = None,
+        check_dependencies: bool = True,
 ) -> "RSEProtocol":
     """
     Instantiates the protocol defined for the given operation.
@@ -204,6 +205,7 @@ def create_protocol(
     :param auth_token:    Optionally passing JSON Web Token (OIDC) string for authentication
     :param protocol_attr: Optionally passing the full protocol availability information to correctly select WAN/LAN
     :param logger:        Optional decorated logger that can be passed from the calling daemons or servers.
+    :param check_dependencies: Verify optional transport dependencies before returning the protocol.
     :returns:             An instance of the requested protocol
     """
 
@@ -243,6 +245,7 @@ def create_protocol(
 
     missing_dependency = None
     for candidate_attr in candidate_protocols:
+        protocol_instance = None
         comp = candidate_attr['impl'].split('.')
         prefix = '.'.join(comp[-2:]) + ': '
         protocol_logger = formatted_logger(logger, prefix + "%s")
@@ -256,8 +259,18 @@ def create_protocol(
                     raise exception.RucioException(str(error))  # TODO: provide proper rucio exception
             protocol_attr_with_auth = copy.copy(candidate_attr)
             protocol_attr_with_auth['auth_token'] = auth_token
-            return mod(protocol_attr_with_auth, rse_settings, logger=protocol_logger)
+            protocol_instance = mod(protocol_attr_with_auth, rse_settings, logger=protocol_logger)
+            if check_dependencies:
+                dependency_check = getattr(protocol_instance, 'check_dependencies', None)
+                if dependency_check is not None:
+                    dependency_check()
+            return protocol_instance
         except exception.MissingDependency as error:
+            if protocol_instance is not None:
+                try:
+                    protocol_instance.close()
+                except Exception:
+                    protocol_logger(logging.DEBUG, 'Failed to close unavailable protocol implementation', exc_info=True)
             if protocol_is_explicit:
                 raise
             missing_dependency = error
@@ -296,7 +309,20 @@ def lfns2pfns(
         :returns:           a dict with scope:name as key and the PFN as value
 
     """
-    return create_protocol(rse_settings, operation, scheme, domain, auth_token=auth_token, logger=logger, impl=impl).lfns2pfns(lfns)
+    protocol = create_protocol(
+        rse_settings,
+        operation,
+        scheme,
+        domain,
+        auth_token=auth_token,
+        logger=logger,
+        impl=impl,
+        check_dependencies=False,
+    )
+    try:
+        return protocol.lfns2pfns(lfns)
+    finally:
+        protocol.close()
 
 
 def parse_pfns(
@@ -324,7 +350,18 @@ def parse_pfns(
     """
     if len(set([urlparse(pfn).scheme for pfn in pfns])) != 1:
         raise ValueError('All PFNs must provide the same protocol scheme')
-    return create_protocol(rse_settings, operation, urlparse(pfns[0]).scheme, domain, auth_token=auth_token).parse_pfns(pfns)
+    protocol = create_protocol(
+        rse_settings,
+        operation,
+        urlparse(pfns[0]).scheme,
+        domain,
+        auth_token=auth_token,
+        check_dependencies=False,
+    )
+    try:
+        return protocol.parse_pfns(pfns)
+    finally:
+        protocol.close()
 
 
 def exists(

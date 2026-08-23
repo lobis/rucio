@@ -844,7 +844,7 @@ def test_download_file_with_supported_protocol_from_config(rse_factory, did_fact
     with patch('rucio.rse.protocols.%s.Default.get' % supported_impl, side_effect=lambda pfn, dest, **kw: shutil.copy(path, dest)) as mock_get, \
             patch('rucio.rse.protocols.%s.Default.connect' % supported_impl), \
             patch('rucio.rse.protocols.%s.Default.close' % supported_impl):
-        download_client.download_dids([{'did': did_str, 'impl': supported_impl}])
+        download_client.download_dids([{'did': did_str}])
         mock_get.assert_called()
 
 

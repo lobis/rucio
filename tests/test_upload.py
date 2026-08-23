@@ -20,7 +20,7 @@ from random import choice
 from string import ascii_uppercase
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -75,11 +75,14 @@ def test_upload_item_selects_read_and_delete_implementations_independently(sign_
     write_protocol.attributes = {'scheme': 'root'}
     read_protocol = MagicMock()
     delete_protocol = MagicMock()
-    pfn = 'root://example.com//file'
-    write_protocol.lfns2pfns.return_value = {'mock:file': pfn}
+    write_pfn = 'root://write.example/write-prefix/file'
+    read_pfn = 'https://read.example/read-prefix/file'
+    delete_pfn = 'davs://delete.example/delete-prefix/file'
+    write_protocol.lfns2pfns.return_value = {'mock:file': write_pfn}
+    read_protocol.lfns2pfns.return_value = {'mock:file': read_pfn}
     read_protocol.exists.side_effect = [False, True]
     read_protocol.stat.return_value = {'filesize': '4'}
-    delete_protocol.lfns2pfns.return_value = {'mock:file': pfn}
+    delete_protocol.lfns2pfns.return_value = {'mock:file': delete_pfn}
 
     protocols = {
         'write': write_protocol,
@@ -106,19 +109,20 @@ def test_upload_item_selects_read_and_delete_implementations_independently(sign_
             sign_service=sign_service,
         )
 
-    assert result == pfn
+    assert result == write_pfn
     assert create.call_args_list[0].kwargs['impl'] == write_impl
     assert create.call_args_list[1].args[1] == 'read'
     assert create.call_args_list[1].kwargs['impl'] is None
-    assert create.call_args_list[1].kwargs['force_scheme'] == 'root'
+    assert create.call_args_list[1].kwargs['force_scheme'] is None
     assert create.call_args_list[2].args[1] == 'delete'
     assert create.call_args_list[2].kwargs['impl'] is None
-    assert create.call_args_list[2].kwargs['force_scheme'] == 'root'
+    assert create.call_args_list[2].kwargs['force_scheme'] is None
     write_protocol.exists.assert_not_called()
     write_protocol.stat.assert_not_called()
     assert read_protocol.exists.call_count == 2
-    read_protocol.stat.assert_called_once_with('%s.rucio.upload' % pfn)
-    delete_protocol.delete.assert_called_once_with('%s.rucio.upload' % pfn)
+    assert read_protocol.exists.call_args_list == [call(read_pfn), call('%s.rucio.upload' % read_pfn)]
+    read_protocol.stat.assert_called_once_with('%s.rucio.upload' % read_pfn)
+    delete_protocol.delete.assert_called_once_with('%s.rucio.upload' % delete_pfn)
     write_protocol.put.assert_called_once()
     read_protocol.close.assert_called_once()
     write_protocol.close.assert_called_once()
@@ -134,6 +138,7 @@ def test_upload_item_stops_after_existing_final_file():
     read_protocol = MagicMock()
     pfn = 'root://example.com//file'
     write_protocol.lfns2pfns.return_value = {'mock:file': pfn}
+    read_protocol.lfns2pfns.return_value = {'mock:file': pfn}
     read_protocol.exists.return_value = True
 
     def create_protocol(_rse_settings, operation, **_kwargs):
@@ -186,6 +191,46 @@ def test_upload_without_configured_preference_does_not_probe_protocols():
         assert upload_client.preferred_impl({'protocols': []}, 'wan') is None
 
     create_protocol.assert_not_called()
+
+
+def test_bulk_upload_probes_preferred_impl_once_per_rse():
+    upload_client = UploadClient.__new__(UploadClient)
+    upload_client.logger = MagicMock()
+    upload_client.client = MagicMock(vo='def')
+    upload_client.client.list_rses.return_value = [{'rse': 'MOCK'}]
+    upload_client.client.list_rse_attributes.return_value = {}
+    upload_client.client_location = None
+    upload_client.auth_token = None
+    upload_client.trace = {}
+    upload_client.rses = {}
+    upload_client.rse_expressions = {}
+    upload_client.preferred_impl = MagicMock(return_value='rucio.rse.protocols.xrootd.Default')
+    upload_client._rse_exists = MagicMock(return_value=False)
+    files = [
+        {
+            'rse': 'MOCK',
+            'basename': 'file-{}'.format(index),
+            'did_scope': 'mock',
+            'did_name': 'file-{}'.format(index),
+            'bytes': 4,
+            'no_register': True,
+        }
+        for index in range(2)
+    ]
+    settings = {
+        'availability_write': 1,
+        'sign_url': None,
+        'deterministic': True,
+        'domain': [],
+    }
+
+    with patch.object(upload_client, '_collect_and_validate_file_info', return_value=files), \
+            patch('rucio.client.uploadclient.rsemgr.get_rse_info', return_value=settings), \
+            patch('rucio.client.uploadclient.rsemgr.get_protocols_ordered', return_value=[]), \
+            pytest.raises(NoFilesUploaded):
+        upload_client.upload([{'path': 'unused'}])
+
+    upload_client.preferred_impl.assert_called_once_with(settings, 'wan')
 
 
 def test_upload_preflight_falls_back_after_native_failure():
@@ -564,15 +609,11 @@ def test_upload_file_with_supported_protocol_from_config(rse_factory, upload_cli
 
     rse_name, rse_id = rse_factory.make_rse()
 
-    # FIXME:
-    # The correct order to test should actually be ssh,xrootd,posix
-    # However the preferred_impl is not working correctly.
-    # Once preferred_impl is fixed, this should be changed back
     add_protocol(rse_id, {'scheme': 'scp',
                           'hostname': '%s.cern.ch' % rse_id,
                           'port': 0,
                           'prefix': '/test/',
-                          'impl': 'rucio.rse.protocols.xrootd.Default',
+                          'impl': 'rucio.rse.protocols.posix.Default',
                           'domains': {
                               'lan': {'read': 0, 'write': 0, 'delete': 0},
                               'wan': {'read': 0, 'write': 0, 'delete': 0}}})
@@ -580,7 +621,7 @@ def test_upload_file_with_supported_protocol_from_config(rse_factory, upload_cli
                           'hostname': '%s.cern.ch' % rse_id,
                           'port': 0,
                           'prefix': '/test/',
-                          'impl': 'rucio.rse.protocols.posix.Default',
+                          'impl': 'rucio.rse.protocols.ssh.Default',
                           'domains': {
                               'lan': {'read': 1, 'write': 1, 'delete': 1},
                               'wan': {'read': 1, 'write': 1, 'delete': 1}}})
@@ -588,7 +629,7 @@ def test_upload_file_with_supported_protocol_from_config(rse_factory, upload_cli
                           'hostname': '%s.cern.ch' % rse_id,
                           'port': 0,
                           'prefix': '/test/',
-                          'impl': 'rucio.rse.protocols.ssh.Default',
+                          'impl': 'rucio.rse.protocols.xrootd.Default',
                           'domains': {
                               'lan': {'read': 2, 'write': 2, 'delete': 2},
                               'wan': {'read': 2, 'write': 2, 'delete': 2}}})
