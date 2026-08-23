@@ -309,7 +309,7 @@ def lfns2pfns(
         :returns:           a dict with scope:name as key and the PFN as value
 
     """
-    protocol = create_protocol(
+    return create_protocol(
         rse_settings,
         operation,
         scheme,
@@ -318,11 +318,7 @@ def lfns2pfns(
         logger=logger,
         impl=impl,
         check_dependencies=False,
-    )
-    try:
-        return protocol.lfns2pfns(lfns)
-    finally:
-        protocol.close()
+    ).lfns2pfns(lfns)
 
 
 def parse_pfns(
@@ -350,18 +346,14 @@ def parse_pfns(
     """
     if len(set([urlparse(pfn).scheme for pfn in pfns])) != 1:
         raise ValueError('All PFNs must provide the same protocol scheme')
-    protocol = create_protocol(
+    return create_protocol(
         rse_settings,
         operation,
         urlparse(pfns[0]).scheme,
         domain,
         auth_token=auth_token,
         check_dependencies=False,
-    )
-    try:
-        return protocol.parse_pfns(pfns)
-    finally:
-        protocol.close()
+    ).parse_pfns(pfns)
 
 
 def exists(
