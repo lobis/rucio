@@ -202,6 +202,7 @@ def test_bulk_upload_probes_preferred_impl_once_per_rse():
     upload_client.client_location = None
     upload_client.auth_token = None
     upload_client.trace = {}
+    upload_client.tracing = False
     upload_client.rses = {}
     upload_client.rse_expressions = {}
     upload_client.preferred_impl = MagicMock(return_value='rucio.rse.protocols.xrootd.Default')
@@ -656,8 +657,9 @@ def test_upload_file_with_supported_protocol_from_config(rse_factory, upload_cli
                 patch('rucio.rse.protocols.%s.Default.exists' % supported_impl, side_effect=lambda pfn, **kw: False), \
                 patch('rucio.rse.protocols.%s.Default.delete' % supported_impl), \
                 patch('rucio.rse.protocols.%s.Default.rename' % supported_impl), \
-                patch('rucio.rse.protocols.%s.Default.stat' % supported_impl, side_effect=lambda pfn: {'filesize': os.stat(path)[os.path.stat.ST_SIZE], 'adler32': adler32(path)}), \
-                patch('rucio.rse.protocols.%s.Default.close' % supported_impl):
+                patch('rucio.rse.protocols.%s.Default.close' % supported_impl), \
+                patch('rucio.rse.protocols.posix.Default.exists', return_value=False), \
+                patch('rucio.rse.protocols.posix.Default.stat', side_effect=lambda pfn: {'filesize': os.stat(path)[os.path.stat.ST_SIZE], 'adler32': adler32(path)}):
             mock_put.__name__ = "mock_put"
             upload_client.upload(items=[item])
             mock_put.assert_called()

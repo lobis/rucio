@@ -182,7 +182,9 @@ def test_xrootd_url_operations_do_not_require_optional_binding(monkeypatch):
     }
     rse_settings = {
         'rse': 'MOCK',
-        'deterministic': True,
+        # Keep this URL-only test independent of server-side VO policy
+        # lookups, which require a persisted RSE id.
+        'deterministic': False,
         'protocols': [protocol],
     }
     pfn = 'root://example.com:1094/rucio/mock/file'
@@ -456,11 +458,16 @@ def test_native_xrootd_scopes_workers_to_protocol_credentials(monkeypatch):
     workers = []
 
     class FakeWorker:
-        def __init__(self, module_path, auth_mode, token_path=None, proxy_path=None):
+        def __init__(
+                self, module_path, auth_mode, token_path=None, proxy_path=None,
+                cert_path=None, key_path=None,
+        ):
             self.module_path = module_path
             self.auth_mode = auth_mode
             self.token_path = token_path
             self.proxy_path = proxy_path
+            self.cert_path = cert_path
+            self.key_path = key_path
             workers.append(self)
 
         def request(self, _request):
