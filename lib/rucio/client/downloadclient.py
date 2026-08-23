@@ -801,7 +801,7 @@ class DownloadClient:
                 scheme = source['pfn'].split(':', 1)[0]
                 return any(
                     protocol['scheme'] == scheme and protocol['impl'] == preferred_impl
-                    for protocol in rse_settings['protocols']
+                    for protocol in rse_settings.get('protocols', [])
                 )
 
             # The preferred implementation is meaningful only for PFNs whose
