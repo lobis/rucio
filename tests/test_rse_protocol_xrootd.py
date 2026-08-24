@@ -220,7 +220,7 @@ def test_rsemanager_exists_fallback_uses_independent_writer_for_lfn(monkeypatch)
     monkeypatch.setattr(rsemanager, 'create_protocol', create_protocol)
     monkeypatch.setattr(rsemanager.utils, 'is_method_overridden', lambda *_args, **_kwargs: False)
 
-    assert not rsemanager.exists({}, {'scope': 'mock', 'name': 'file'})
+    assert not rsemanager.exists({'sign_url': None}, {'scope': 'mock', 'name': 'file'})
     assert create_protocol.call_args_list[1].kwargs['scheme'] is None
     read_protocol.close.assert_called_once()
     write_protocol.close.assert_called_once()
