@@ -1153,7 +1153,7 @@ class UploadClient:
                                                         required_methods=('delete',))
                 delete_pfn = force_pfn or list(protocol_delete.lfns2pfns(make_valid_did(lfn)).values())[0]
                 delete_pfn = '%s.rucio.upload' % delete_pfn
-                delete_pfn = self._sign_pfn(rse_settings, sign_service, 'delete', delete_pfn)
+                delete_pfn = cast("str", self._sign_pfn(rse_settings, sign_service, 'delete', delete_pfn))
                 protocol_delete.delete(delete_pfn)
             except Exception as error:
                 self._close_protocols(protocol_read, protocol_write)
@@ -1176,7 +1176,7 @@ class UploadClient:
                                                         impl=impl,
                                                         required_methods=('delete',))
                 delete_pfn = force_pfn or list(protocol_delete.lfns2pfns(make_valid_did(lfn)).values())[0]
-                delete_pfn = self._sign_pfn(rse_settings, sign_service, 'delete', delete_pfn)
+                delete_pfn = cast("str", self._sign_pfn(rse_settings, sign_service, 'delete', delete_pfn))
                 protocol_delete.delete(delete_pfn)
             except Exception as error:
                 self._close_protocols(protocol_read, protocol_write)
