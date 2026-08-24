@@ -56,16 +56,18 @@ class _CredentialWorker:
             proxy_path: str | None = None,
             cert_path: str | None = None,
             key_path: str | None = None,
+            gsi_create_proxy: str | None = None,
     ) -> None:
         self._token_path = token_path
         self._proxy_path = proxy_path
         self._cert_path = cert_path
         self._key_path = key_path
+        self._gsi_create_proxy = gsi_create_proxy
         if auth_mode == 'gsi' and proxy_path is None and cert_path is None and key_path is None:
             # Direct worker users retain explicitly selected certificate/key
             # authentication. Protocol instances pass immutable snapshots here.
-            selected_cert = os.environ.get('X509_USER_CERT')
-            selected_key = os.environ.get('X509_USER_KEY')
+            selected_cert = os.environ.get('XrdSecGSIUSERCERT') or os.environ.get('X509_USER_CERT')
+            selected_key = os.environ.get('XrdSecGSIUSERKEY') or os.environ.get('X509_USER_KEY')
             if selected_cert and selected_key and os.path.isfile(selected_cert) and os.path.isfile(selected_key):
                 self._cert_path = selected_cert
                 self._key_path = selected_key
@@ -138,15 +140,20 @@ class _CredentialWorker:
         env['HOME'] = self._home.name
         env['XDG_RUNTIME_DIR'] = self._home.name
         env['XrdSecPROTOCOL'] = self._auth_mode
+        if self._gsi_create_proxy is not None:
+            env['XrdSecGSICREATEPROXY'] = self._gsi_create_proxy
         if self._auth_mode == 'ztn':
             if self._token_path is None:
                 raise exception.ServiceUnavailable('Native XRootD bearer worker has no token')
             env['BEARER_TOKEN_FILE'] = self._token_path
         elif self._proxy_path is not None:
             env['X509_USER_PROXY'] = self._proxy_path
+            env['XrdSecGSIUSERPROXY'] = self._proxy_path
         elif self._cert_path is not None and self._key_path is not None:
             env['X509_USER_CERT'] = self._cert_path
             env['X509_USER_KEY'] = self._key_path
+            env['XrdSecGSIUSERCERT'] = self._cert_path
+            env['XrdSecGSIUSERKEY'] = self._key_path
         else:
             env['X509_USER_PROXY'] = os.devnull
 
@@ -237,7 +244,9 @@ except Exception:
 
 def _client() -> ModuleType:
     if _xrootd_client is None:
-        raise exception.MissingDependency('Missing dependency : xrootd')
+        raise exception.MissingDependency(
+            "Missing dependency: xrootd. Install 'rucio-clients[xrootd]' for native XRootD transfers."
+        )
     return _xrootd_client
 
 
@@ -271,6 +280,7 @@ class Default(protocol.RSEProtocol):
         self.__key_file: Any | None = None
         self.__worker_lock = threading.Lock()
         self.__auth_mode = 'ztn' if self.auth_token else 'gsi'
+        self.__gsi_create_proxy = os.environ.get('XrdSecGSICREATEPROXY') if self.__auth_mode == 'gsi' else None
         selected_proxy = None if self.__auth_mode == 'ztn' else self._valid_x509_proxy()
         self.__x509_proxy = self._snapshot_x509_proxy(selected_proxy)
         selected_cert, selected_key = (None, None)
@@ -282,6 +292,7 @@ class Default(protocol.RSEProtocol):
             self.__x509_proxy,
             self.__x509_cert,
             self.__x509_key,
+            self.__gsi_create_proxy,
         )
         self.__worker: _CredentialWorker | None = None
 
@@ -317,6 +328,9 @@ class Default(protocol.RSEProtocol):
         if 'RUCIO_CLIENT_PROXY' in os.environ:
             return self._expand_x509_proxy(os.environ['RUCIO_CLIENT_PROXY'])
 
+        if 'XrdSecGSIUSERPROXY' in os.environ:
+            return self._expand_x509_proxy(os.environ['XrdSecGSIUSERPROXY'])
+
         configured_proxy = self._configured_x509_proxy()
         if configured_proxy is not None:
             return self._expand_x509_proxy(configured_proxy)
@@ -324,20 +338,32 @@ class Default(protocol.RSEProtocol):
         if 'X509_USER_PROXY' in os.environ:
             return self._expand_x509_proxy(os.environ['X509_USER_PROXY'])
 
-        if 'X509_USER_CERT' in os.environ or 'X509_USER_KEY' in os.environ:
+        if any(variable in os.environ for variable in (
+            'X509_USER_CERT', 'X509_USER_KEY', 'XrdSecGSIUSERCERT', 'XrdSecGSIUSERKEY',
+        )):
             return None
 
         return self._expand_x509_proxy(self._default_x509_proxy())
 
     def _valid_x509_cert_key(self) -> tuple[str | None, str | None]:
-        if 'RUCIO_CLIENT_PROXY' in os.environ or 'X509_USER_PROXY' in os.environ:
+        if any(variable in os.environ for variable in (
+            'RUCIO_CLIENT_PROXY', 'X509_USER_PROXY', 'XrdSecGSIUSERPROXY',
+        )):
             return None, None
         if self._configured_x509_proxy() is not None:
             return None, None
-        if 'X509_USER_CERT' not in os.environ and 'X509_USER_KEY' not in os.environ:
-            return None, None
-        cert = self._expand_x509_proxy(os.environ.get('X509_USER_CERT'))
-        key = self._expand_x509_proxy(os.environ.get('X509_USER_KEY'))
+        cert_selector = (
+            os.environ.get('XrdSecGSIUSERCERT')
+            if 'XrdSecGSIUSERCERT' in os.environ
+            else os.environ.get('X509_USER_CERT') if 'X509_USER_CERT' in os.environ else self._default_x509_cert()
+        )
+        key_selector = (
+            os.environ.get('XrdSecGSIUSERKEY')
+            if 'XrdSecGSIUSERKEY' in os.environ
+            else os.environ.get('X509_USER_KEY') if 'X509_USER_KEY' in os.environ else self._default_x509_key()
+        )
+        cert = self._expand_x509_proxy(cert_selector)
+        key = self._expand_x509_proxy(key_selector)
         if cert is None or key is None:
             return None, None
         return cert, key
@@ -362,6 +388,14 @@ class Default(protocol.RSEProtocol):
         return None
 
     @staticmethod
+    def _default_x509_cert() -> str:
+        return os.path.join(os.path.expanduser('~'), '.globus', 'usercert.pem')
+
+    @staticmethod
+    def _default_x509_key() -> str:
+        return os.path.join(os.path.expanduser('~'), '.globus', 'userkey.pem')
+
+    @staticmethod
     def _expand_x509_proxy(proxy: str | None) -> str | None:
         if not proxy:
             return None
@@ -377,6 +411,7 @@ class Default(protocol.RSEProtocol):
             proxy: str | None,
             cert: str | None = None,
             key: str | None = None,
+            gsi_create_proxy: str | None = None,
     ) -> str:
         digest = hashlib.sha256()
         selected_credentials = (
@@ -396,6 +431,9 @@ class Default(protocol.RSEProtocol):
                 digest.update(os.path.abspath(credential_path).encode())
         if all(path is None for _, path in selected_credentials):
             digest.update(b'no-gsi-credential')
+        if gsi_create_proxy is not None:
+            digest.update(b'create-proxy')
+            digest.update(gsi_create_proxy.encode())
         return digest.hexdigest()
 
     def _snapshot_x509_proxy(self, proxy: str | None) -> str | None:
@@ -493,6 +531,7 @@ class Default(protocol.RSEProtocol):
                     proxy_path=x509_proxy,
                     cert_path=x509_cert,
                     key_path=x509_key,
+                    gsi_create_proxy=getattr(self, '_Default__gsi_create_proxy', None),
                 )
                 self.__worker = worker
         return worker.request(request)

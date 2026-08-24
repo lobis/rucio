@@ -16,6 +16,7 @@ import json
 import os
 import sys
 import threading
+from functools import partial
 from pathlib import Path
 from unittest.mock import MagicMock
 from urllib.parse import parse_qs, urlsplit
@@ -118,6 +119,9 @@ def _protocol(auth_token=None, x509_proxy=None, credential_id='credential-id'):
     protocol._Default__worker = None
     protocol._Default__worker_lock = threading.Lock()
     protocol._Default__x509_proxy = x509_proxy
+    protocol._Default__x509_cert = None
+    protocol._Default__x509_key = None
+    protocol._Default__gsi_create_proxy = None
     protocol._Default__credential_id = credential_id
     return protocol
 
@@ -163,12 +167,15 @@ def test_rsemanager_falls_back_from_missing_optional_binding(monkeypatch):
         'read',
         scheme='root',
         auth_token='transfer-token',
+        check_dependencies=True,
     )
 
     assert isinstance(result, posix.Default)
     assert all('auth_token' not in protocol for protocol in rse_settings['protocols'])
     with pytest.raises(exception.MissingDependency):
-        rsemanager.create_protocol(rse_settings, 'read', scheme='root', impl=native_impl)
+        rsemanager.create_protocol(
+            rse_settings, 'read', scheme='root', impl=native_impl, check_dependencies=True,
+        )
 
 
 def test_xrootd_url_operations_do_not_require_optional_binding(monkeypatch):
@@ -198,6 +205,26 @@ def test_xrootd_url_operations_do_not_require_optional_binding(monkeypatch):
     ) == {'mock:file': pfn}
     assert rsemanager.parse_pfns(rse_settings, [pfn])[pfn]['name'] == 'file'
 
+    protocol_instance = rsemanager.create_protocol(rse_settings, 'read', scheme='root')
+    assert isinstance(protocol_instance, xrootd.Default)
+
+
+def test_rsemanager_exists_fallback_uses_independent_writer_for_lfn(monkeypatch):
+    read_protocol = MagicMock()
+    read_protocol.attributes = {'scheme': 'magnet'}
+    write_protocol = MagicMock()
+    write_protocol.lfns2pfns.return_value = {'mock:file': 'root://example.com//file'}
+    write_protocol.exists.return_value = False
+
+    create_protocol = MagicMock(side_effect=[read_protocol, write_protocol])
+    monkeypatch.setattr(rsemanager, 'create_protocol', create_protocol)
+    monkeypatch.setattr(rsemanager.utils, 'is_method_overridden', lambda *_args, **_kwargs: False)
+
+    assert not rsemanager.exists({}, {'scope': 'mock', 'name': 'file'})
+    assert create_protocol.call_args_list[1].kwargs['scheme'] is None
+    read_protocol.close.assert_called_once()
+    write_protocol.close.assert_called_once()
+
 
 @pytest.mark.parametrize('operation_error', [None, exception.ServiceUnavailable('stat failed')])
 def test_rsemanager_exists_always_closes_protocol(monkeypatch, operation_error):
@@ -214,6 +241,43 @@ def test_rsemanager_exists_always_closes_protocol(monkeypatch, operation_error):
     else:
         with pytest.raises(exception.ServiceUnavailable):
             rsemanager.exists({}, '/tmp/file')
+
+    protocol.close.assert_called_once()
+
+
+def test_rsemanager_upload_closes_partial_protocol_initialization(monkeypatch):
+    write_protocol = MagicMock()
+    delete_protocol = MagicMock()
+    delete_protocol.connect.side_effect = exception.ServiceUnavailable('connect failed')
+    monkeypatch.setattr(rsemanager, 'create_protocol', MagicMock(side_effect=[write_protocol, delete_protocol]))
+
+    with pytest.raises(exception.ServiceUnavailable, match='connect failed'):
+        rsemanager.upload({}, {'scope': 'mock', 'name': 'file'})
+
+    write_protocol.close.assert_called_once()
+    delete_protocol.close.assert_called_once()
+
+
+@pytest.mark.parametrize('operation', ['delete', 'rename', 'get_space_usage'])
+def test_rsemanager_operations_close_protocol_after_setup_failure(monkeypatch, operation):
+    protocol = MagicMock()
+    monkeypatch.setattr(rsemanager, 'create_protocol', MagicMock(return_value=protocol))
+
+    if operation == 'delete':
+        protocol.lfns2pfns.side_effect = exception.ServiceUnavailable('pfn failed')
+        call_operation = partial(rsemanager.delete, {}, {'scope': 'mock', 'name': 'file'})
+    elif operation == 'rename':
+        protocol.exists.side_effect = exception.ServiceUnavailable('exists failed')
+        protocol.lfns2pfns.return_value = {'mock:file': 'root://example.com//file'}
+        call_operation = partial(
+            rsemanager.rename, {}, {'scope': 'mock', 'name': 'file', 'new_name': 'new-file'},
+        )
+    else:
+        protocol.connect.side_effect = exception.ServiceUnavailable('connect failed')
+        call_operation = partial(rsemanager.get_space_usage, {})
+
+    with pytest.raises(exception.ServiceUnavailable):
+        call_operation()
 
     protocol.close.assert_called_once()
 
@@ -371,6 +435,7 @@ def test_native_xrootd_gsi_worker_removes_ambient_credentials(monkeypatch, tmp_p
     worker_env = captured['env']
     assert worker_env['XrdSecPROTOCOL'] == 'gsi'
     assert worker_env['X509_USER_PROXY'] == str(proxy)
+    assert worker_env['XrdSecGSIUSERPROXY'] == str(proxy)
     assert worker_env['HOME'] != os.environ['HOME']
     assert worker_env['XDG_RUNTIME_DIR'] == worker_env['HOME']
     assert os.path.isdir(worker_env['HOME'])
@@ -380,7 +445,6 @@ def test_native_xrootd_gsi_worker_removes_ambient_credentials(monkeypatch, tmp_p
         'X509_USER_CERT',
         'X509_USER_KEY',
         'XrdSecCREDS',
-        'XrdSecGSIUSERPROXY',
         'XrdSecPROXYCREDS',
         'XrdSecUSER',
     ):
@@ -454,13 +518,108 @@ def test_native_xrootd_pins_explicit_cert_key(monkeypatch, tmp_path):
     assert not Path(pinned_key).exists()
 
 
+def test_native_xrootd_honors_native_gsi_proxy_selector(monkeypatch, tmp_path):
+    native_proxy = tmp_path / 'native-proxy'
+    x509_proxy = tmp_path / 'x509-proxy'
+    native_proxy.write_text('native identity')
+    x509_proxy.write_text('x509 identity')
+    protocol = _protocol()
+    protocol._configured_x509_proxy = lambda: None
+
+    monkeypatch.delenv('RUCIO_CLIENT_PROXY', raising=False)
+    monkeypatch.setenv('XrdSecGSIUSERPROXY', str(native_proxy))
+    monkeypatch.setenv('X509_USER_PROXY', str(x509_proxy))
+
+    assert protocol._valid_x509_proxy() == str(native_proxy)
+
+
+def test_native_xrootd_honors_native_gsi_cert_key_selectors(monkeypatch, tmp_path):
+    cert = tmp_path / 'native-cert.pem'
+    key = tmp_path / 'native-key.pem'
+    cert.write_text('certificate')
+    key.write_text('private key')
+    protocol = _protocol()
+    protocol._configured_x509_proxy = lambda: None
+
+    for variable in (
+        'RUCIO_CLIENT_PROXY', 'X509_USER_PROXY', 'X509_USER_CERT', 'X509_USER_KEY',
+        'XrdSecGSIUSERPROXY',
+    ):
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setenv('XrdSecGSIUSERCERT', str(cert))
+    monkeypatch.setenv('XrdSecGSIUSERKEY', str(key))
+
+    assert protocol._valid_x509_cert_key() == (str(cert), str(key))
+
+
+def test_native_xrootd_partial_cert_override_uses_default_counterpart(monkeypatch, tmp_path):
+    cert = tmp_path / 'explicit-cert.pem'
+    key = tmp_path / 'default-key.pem'
+    cert.write_text('certificate')
+    key.write_text('private key')
+    protocol = _protocol()
+    protocol._configured_x509_proxy = lambda: None
+    protocol._default_x509_key = lambda: str(key)
+
+    for variable in (
+        'RUCIO_CLIENT_PROXY', 'X509_USER_PROXY', 'X509_USER_KEY',
+        'XrdSecGSIUSERPROXY', 'XrdSecGSIUSERCERT', 'XrdSecGSIUSERKEY',
+    ):
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setenv('X509_USER_CERT', str(cert))
+
+    assert protocol._valid_x509_cert_key() == (str(cert), str(key))
+
+
+def test_native_xrootd_uses_globus_cert_key_fallback(monkeypatch, tmp_path):
+    globus = tmp_path / '.globus'
+    globus.mkdir()
+    cert = globus / 'usercert.pem'
+    key = globus / 'userkey.pem'
+    cert.write_text('certificate')
+    key.write_text('private key')
+    protocol = _protocol()
+    protocol._configured_x509_proxy = lambda: None
+    protocol._default_x509_proxy = lambda: None
+
+    for variable in (
+        'RUCIO_CLIENT_PROXY', 'X509_USER_PROXY', 'X509_USER_CERT', 'X509_USER_KEY',
+        'XrdSecGSIUSERPROXY', 'XrdSecGSIUSERCERT', 'XrdSecGSIUSERKEY',
+    ):
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setenv('HOME', str(tmp_path))
+
+    assert protocol._valid_x509_cert_key() == (str(cert), str(key))
+
+
+def test_native_xrootd_worker_preserves_gsi_create_proxy_policy(monkeypatch):
+    captured = {}
+    process = MagicMock()
+    process.poll.return_value = None
+    process.wait.return_value = 0
+    monkeypatch.setenv('XrdSecGSICREATEPROXY', '0')
+
+    worker = xrootd._CredentialWorker('/trusted/site-packages', 'gsi', gsi_create_proxy='0')
+
+    def start_worker(_command, *, env, **_kwargs):
+        captured['env'] = env
+        return process
+
+    monkeypatch.setattr(xrootd.subprocess, 'Popen', start_worker)
+    try:
+        worker._start()
+        assert captured['env']['XrdSecGSICREATEPROXY'] == '0'
+    finally:
+        worker.close()
+
+
 def test_native_xrootd_scopes_workers_to_protocol_credentials(monkeypatch):
     workers = []
 
     class FakeWorker:
         def __init__(
                 self, module_path, auth_mode, token_path=None, proxy_path=None,
-                cert_path=None, key_path=None,
+                cert_path=None, key_path=None, gsi_create_proxy=None,
         ):
             self.module_path = module_path
             self.auth_mode = auth_mode
@@ -468,6 +627,7 @@ def test_native_xrootd_scopes_workers_to_protocol_credentials(monkeypatch):
             self.proxy_path = proxy_path
             self.cert_path = cert_path
             self.key_path = key_path
+            self.gsi_create_proxy = gsi_create_proxy
             workers.append(self)
 
         def request(self, _request):

@@ -193,7 +193,7 @@ def create_protocol(
         protocol_attr: Optional[types.RSEProtocolDict] = None,
         logger: types.LoggerFunction = logging.log,
         impl: Optional[str] = None,
-        check_dependencies: bool = True,
+        check_dependencies: bool = False,
 ) -> "RSEProtocol":
     """
     Instantiates the protocol defined for the given operation.
@@ -397,6 +397,7 @@ def exists(
             auth_token=auth_token,
             protocol_attr=protocol_attr,
             logger=logger,
+            check_dependencies=True,
         )
         protocol.connect()
 
@@ -405,12 +406,22 @@ def exists(
         if not utils.is_method_overridden(protocol, RSEProtocol, 'exists'):
             # If not overridden, optionally fall back to a write protocol
             selected_scheme = protocol.attributes['scheme']
+            files_to_check = files if isinstance(files, list) else [files]
+            fallback_scheme = selected_scheme if any(isinstance(file, STRING_TYPES) for file in files_to_check) else None
             try:
                 protocol.close()
             except Exception:
                 logger(logging.DEBUG, 'Failed to close read protocol before write fallback', exc_info=True)
             protocol = None
-            protocol = create_protocol(rse_settings, 'write', scheme=selected_scheme, domain=domain, auth_token=auth_token, logger=logger)
+            protocol = create_protocol(
+                rse_settings,
+                'write',
+                scheme=fallback_scheme,
+                domain=domain,
+                auth_token=auth_token,
+                logger=logger,
+                check_dependencies=True,
+            )
             protocol.connect()
 
         ret = {}
@@ -464,7 +475,50 @@ def upload(
         auth_token: Optional[str] = None,
         vo: str = DEFAULT_VO,
         logger: types.LoggerFunction = logging.log,
-        impl: Optional[str] = None
+        impl: Optional[str] = None,
+) -> dict[Union[int, str], Union[bool, str, dict[str, Union[Literal[True], Exception]]]]:
+    """Upload while deterministically releasing every partially initialized protocol."""
+    protocols_to_close: list["RSEProtocol"] = []
+    try:
+        return _upload(
+            rse_settings=rse_settings,
+            lfns=lfns,
+            domain=domain,
+            source_dir=source_dir,
+            force_pfn=force_pfn,
+            force_scheme=force_scheme,
+            transfer_timeout=transfer_timeout,
+            delete_existing=delete_existing,
+            sign_service=sign_service,
+            auth_token=auth_token,
+            vo=vo,
+            logger=logger,
+            impl=impl,
+            protocols_to_close=protocols_to_close,
+        )
+    finally:
+        for protocol_to_close in reversed(protocols_to_close):
+            try:
+                protocol_to_close.close()
+            except Exception:
+                logger(logging.DEBUG, 'Failed to close upload protocol', exc_info=True)
+
+
+def _upload(
+        rse_settings: types.RSESettingsDict,
+        lfns: Union[list[types.LFNDict], types.LFNDict],
+        domain: str = 'wan',
+        source_dir: Optional[str] = None,
+        force_pfn: Optional[str] = None,
+        force_scheme: Optional[str] = None,
+        transfer_timeout: Optional[int] = None,
+        delete_existing: bool = False,
+        sign_service: Optional[str] = None,
+        auth_token: Optional[str] = None,
+        vo: str = DEFAULT_VO,
+        logger: types.LoggerFunction = logging.log,
+        impl: Optional[str] = None,
+        protocols_to_close: Optional[list["RSEProtocol"]] = None,
 ) -> dict[Union[int, str], Union[bool, str, dict[str, Union[Literal[True], Exception]]]]:
     """
         Uploads a file to the connected storage.
@@ -499,9 +553,20 @@ def upload(
     ret = {}
     gs = True  # gs represents the global status which indicates if every operation worked in bulk mode
 
-    protocol = create_protocol(rse_settings, 'write', scheme=force_scheme, domain=domain, auth_token=auth_token, logger=logger, impl=impl)
+    if protocols_to_close is None:
+        protocols_to_close = []
+
+    protocol = create_protocol(
+        rse_settings, 'write', scheme=force_scheme, domain=domain, auth_token=auth_token,
+        logger=logger, impl=impl, check_dependencies=True,
+    )
+    protocols_to_close.append(protocol)
     protocol.connect()
-    protocol_delete = create_protocol(rse_settings, 'delete', domain=domain, auth_token=auth_token, logger=logger, impl=impl)
+    protocol_delete = create_protocol(
+        rse_settings, 'delete', scheme=force_scheme, domain=domain, auth_token=auth_token,
+        logger=logger, impl=impl, check_dependencies=True,
+    )
+    protocols_to_close.append(protocol_delete)
     protocol_delete.connect()
 
     if not isinstance(lfns, list):
@@ -655,8 +720,6 @@ def upload(
                     gs = False
                     ret['%s:%s' % (scope, name)] = exception.RucioException('Replica %s is corrupted.' % pfn)
 
-    protocol.close()
-    protocol_delete.close()
     if len(ret) == 1:
         ret_value = next(iter(ret.values()))
         if isinstance(ret_value, Exception):
@@ -693,28 +756,37 @@ def delete(
     ret = {}
     gs = True  # gs represents the global status which indicates if every operation worked in bulk mode
 
-    protocol = create_protocol(rse_settings, 'delete', domain=domain, auth_token=auth_token, logger=logger, impl=impl)
-    protocol.connect()
+    protocol = None
+    try:
+        protocol = create_protocol(
+            rse_settings, 'delete', domain=domain, auth_token=auth_token,
+            logger=logger, impl=impl, check_dependencies=True,
+        )
+        protocol.connect()
 
-    if not isinstance(lfns, list):
-        lfns = [lfns]
-    for lfn in lfns:
-        pfn = list(protocol.lfns2pfns(lfn).values())[0]
-        try:
-            protocol.delete(pfn)
-            ret['%s:%s' % (lfn['scope'], lfn['name'])] = True
-        except Exception as e:
-            ret['%s:%s' % (lfn['scope'], lfn['name'])] = e
-            gs = False
+        if not isinstance(lfns, list):
+            lfns = [lfns]
+        for lfn in lfns:
+            pfn = list(protocol.lfns2pfns(lfn).values())[0]
+            try:
+                protocol.delete(pfn)
+                ret['%s:%s' % (lfn['scope'], lfn['name'])] = True
+            except Exception as e:
+                ret['%s:%s' % (lfn['scope'], lfn['name'])] = e
+                gs = False
 
-    protocol.close()
-    if len(ret) == 1:
-        ret_value = next(iter(ret.values()))
-        if isinstance(ret_value, Exception):
-            raise ret_value
-        else:
+        if len(ret) == 1:
+            ret_value = next(iter(ret.values()))
+            if isinstance(ret_value, Exception):
+                raise ret_value
             return ret_value
-    return [gs, ret]
+        return [gs, ret]
+    finally:
+        if protocol is not None:
+            try:
+                protocol.close()
+            except Exception:
+                logger(logging.DEBUG, 'Failed to close delete protocol', exc_info=True)
 
 
 def rename(
@@ -752,53 +824,58 @@ def rename(
     ret = {}
     gs = True  # gs represents the global status which indicates if every operation worked in bulk mode
 
-    protocol = create_protocol(rse_settings, 'write', domain=domain, auth_token=auth_token, logger=logger, impl=impl)
-    protocol.connect()
+    protocol = None
+    try:
+        protocol = create_protocol(
+            rse_settings, 'write', domain=domain, auth_token=auth_token,
+            logger=logger, impl=impl, check_dependencies=True,
+        )
+        protocol.connect()
 
-    if not isinstance(files, list):
-        files = [files]
-    for f in files:
-        pfn = None
-        new_pfn = None
-        key = None
-        if 'scope' in f:  # LFN is provided
-            key = '%s:%s' % (f['scope'], f['name'])
-            # Check if new name is provided
-            if 'new_name' not in f:
-                f['new_name'] = f['name']
-            # Check if new scope is provided
-            if 'new_scope' not in f:
-                f['new_scope'] = f['scope']
-            pfn = list(protocol.lfns2pfns({'name': f['name'], 'scope': f['scope']}).values())[0]
-            new_pfn = list(protocol.lfns2pfns({'name': f['new_name'], 'scope': f['new_scope']}).values())[0]
-        else:
-            pfn = f['name']
-            new_pfn = f['new_name']
-            key = pfn
-        # Check if target is not on storage
-        if protocol.exists(new_pfn):
-            ret[key] = exception.FileReplicaAlreadyExists('File %s already exists on storage' % (new_pfn))
-            gs = False
-        # Check if source is on storage
-        elif not protocol.exists(pfn):
-            ret[key] = exception.SourceNotFound('File %s not found on storage' % (pfn))
-            gs = False
-        else:
-            try:
-                protocol.rename(pfn, new_pfn)
-                ret[key] = True
-            except Exception as e:
-                ret[key] = e
+        if not isinstance(files, list):
+            files = [files]
+        for f in files:
+            pfn = None
+            new_pfn = None
+            key = None
+            if 'scope' in f:  # LFN is provided
+                key = '%s:%s' % (f['scope'], f['name'])
+                if 'new_name' not in f:
+                    f['new_name'] = f['name']
+                if 'new_scope' not in f:
+                    f['new_scope'] = f['scope']
+                pfn = list(protocol.lfns2pfns({'name': f['name'], 'scope': f['scope']}).values())[0]
+                new_pfn = list(protocol.lfns2pfns({'name': f['new_name'], 'scope': f['new_scope']}).values())[0]
+            else:
+                pfn = f['name']
+                new_pfn = f['new_name']
+                key = pfn
+            if protocol.exists(new_pfn):
+                ret[key] = exception.FileReplicaAlreadyExists('File %s already exists on storage' % (new_pfn))
                 gs = False
+            elif not protocol.exists(pfn):
+                ret[key] = exception.SourceNotFound('File %s not found on storage' % (pfn))
+                gs = False
+            else:
+                try:
+                    protocol.rename(pfn, new_pfn)
+                    ret[key] = True
+                except Exception as e:
+                    ret[key] = e
+                    gs = False
 
-    protocol.close()
-    if len(ret) == 1:
-        ret_value = next(iter(ret.values()))
-        if isinstance(ret_value, Exception):
-            raise ret_value
-        else:
+        if len(ret) == 1:
+            ret_value = next(iter(ret.values()))
+            if isinstance(ret_value, Exception):
+                raise ret_value
             return ret_value
-    return [gs, ret]
+        return [gs, ret]
+    finally:
+        if protocol is not None:
+            try:
+                protocol.close()
+            except Exception:
+                logger(logging.DEBUG, 'Failed to close rename protocol', exc_info=True)
 
 
 def get_space_usage(
@@ -825,19 +902,28 @@ def get_space_usage(
     gs = True
     ret = {}
 
-    protocol = create_protocol(rse_settings, 'read', scheme=scheme, domain=domain, auth_token=auth_token, logger=logger, impl=impl)
-    protocol.connect()
-
+    protocol = None
     try:
-        totalsize, unusedsize = protocol.get_space_usage()
-        ret["totalsize"] = totalsize
-        ret["unusedsize"] = unusedsize
-    except Exception as e:
-        ret = e
-        gs = False
+        protocol = create_protocol(
+            rse_settings, 'read', scheme=scheme, domain=domain, auth_token=auth_token,
+            logger=logger, impl=impl, check_dependencies=True,
+        )
+        protocol.connect()
 
-    protocol.close()
-    return [gs, ret]
+        try:
+            totalsize, unusedsize = protocol.get_space_usage()
+            ret["totalsize"] = totalsize
+            ret["unusedsize"] = unusedsize
+        except Exception as e:
+            ret = e
+            gs = False
+        return [gs, ret]
+    finally:
+        if protocol is not None:
+            try:
+                protocol.close()
+            except Exception:
+                logger(logging.DEBUG, 'Failed to close space-usage protocol', exc_info=True)
 
 
 def find_matching_scheme(

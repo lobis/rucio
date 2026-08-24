@@ -105,7 +105,6 @@ def test_upload_item_selects_read_and_delete_implementations_independently(sign_
             lfn={'scope': 'mock', 'name': 'file', 'filename': 'file', 'filesize': 4},
             source_dir='/tmp',
             write_impl=write_impl,
-            force_scheme='xroot',
             sign_service=sign_service,
         )
 
@@ -114,18 +113,84 @@ def test_upload_item_selects_read_and_delete_implementations_independently(sign_
     assert create.call_args_list[1].args[1] == 'read'
     assert create.call_args_list[1].kwargs['impl'] is None
     assert create.call_args_list[1].kwargs['force_scheme'] is None
+    assert create.call_args_list[1].kwargs['required_methods'] == ('exists', 'stat')
     assert create.call_args_list[2].args[1] == 'delete'
     assert create.call_args_list[2].kwargs['impl'] is None
     assert create.call_args_list[2].kwargs['force_scheme'] is None
+    assert create.call_args_list[2].kwargs['required_methods'] == ('delete',)
     write_protocol.exists.assert_not_called()
     write_protocol.stat.assert_not_called()
     assert read_protocol.exists.call_count == 2
     assert read_protocol.exists.call_args_list == [call(read_pfn), call('%s.rucio.upload' % read_pfn)]
     read_protocol.stat.assert_called_once_with('%s.rucio.upload' % read_pfn)
     delete_protocol.delete.assert_called_once_with('%s.rucio.upload' % delete_pfn)
+    if sign_service:
+        upload_client.client.get_signed_url.assert_called_once_with(
+            'MOCK', sign_service, 'read', read_pfn,
+        )
+    else:
+        upload_client.client.get_signed_url.assert_not_called()
     write_protocol.put.assert_called_once()
     read_protocol.close.assert_called_once()
     write_protocol.close.assert_called_once()
+
+
+def test_upload_item_applies_force_scheme_to_every_operation():
+    upload_client = UploadClient.__new__(UploadClient)
+    upload_client.logger = MagicMock()
+    upload_client.client = MagicMock()
+    upload_client.auth_token = None
+    write_protocol = MagicMock(renaming=True, overwrite=False)
+    write_protocol.attributes = {'scheme': 'root'}
+    read_protocol = MagicMock()
+    delete_protocol = MagicMock()
+    write_protocol.lfns2pfns.return_value = {'mock:file': 'root://example.com//file'}
+    read_protocol.lfns2pfns.return_value = {'mock:file': 'root://example.com//file'}
+    read_protocol.exists.side_effect = [False, True]
+    delete_protocol.lfns2pfns.return_value = {'mock:file': 'root://example.com//file'}
+
+    def immediate_retry(function, *args, **kwargs):
+        return lambda **_retry_kwargs: function(*args, **kwargs)
+
+    with patch.object(upload_client, '_create_protocol', side_effect=[write_protocol, read_protocol, delete_protocol]) as create, \
+            patch('rucio.client.uploadclient.retry', side_effect=immediate_retry):
+        upload_client._upload_item(
+            rse_settings={'rse': 'MOCK', 'verify_checksum': False},
+            rse_attributes={RseAttr.SKIP_UPLOAD_STAT: True},
+            lfn={'scope': 'mock', 'name': 'file', 'filename': 'file', 'filesize': 4},
+            source_dir='/tmp',
+            force_scheme='root',
+        )
+
+    assert create.call_args_list[0].kwargs['force_scheme'] == 'root'
+    assert create.call_args_list[1].kwargs['force_scheme'] == 'root'
+    assert create.call_args_list[2].kwargs['force_scheme'] == 'root'
+
+
+def test_upload_protocol_creation_skips_missing_capabilities():
+    upload_client = UploadClient.__new__(UploadClient)
+    upload_client.logger = MagicMock()
+    upload_client.auth_token = None
+    unsupported_attr = {'impl': 'rucio.rse.protocols.bittorrent.Default', 'scheme': 'magnet'}
+    supported_attr = {'impl': 'rucio.rse.protocols.gfal.Default', 'scheme': 'https'}
+    unsupported_protocol = MagicMock()
+    supported_protocol = MagicMock()
+
+    def create_protocol(*_args, protocol_attr=None, **_kwargs):
+        return unsupported_protocol if protocol_attr is unsupported_attr else supported_protocol
+
+    with patch.object(upload_client, '_protocol_candidates', return_value=[unsupported_attr, supported_attr]), \
+            patch('rucio.client.uploadclient.rsemgr.create_protocol', side_effect=create_protocol), \
+            patch(
+                'rucio.client.uploadclient.utils.is_method_overridden',
+                side_effect=lambda protocol, _base, _method: protocol is supported_protocol,
+            ):
+        result = upload_client._create_protocol({}, 'read', required_methods=('exists', 'stat'))
+
+    assert result is supported_protocol
+    unsupported_protocol.connect.assert_not_called()
+    unsupported_protocol.close.assert_called_once()
+    supported_protocol.connect.assert_called_once()
 
 
 def test_upload_item_stops_after_existing_final_file():
