@@ -71,6 +71,11 @@ def test_upload_item_selects_read_and_delete_implementations_independently(sign_
     upload_client.client = MagicMock()
     upload_client.auth_token = None
     write_impl = 'rucio.rse.protocols.xrootd.Default'
+    write_protocol_attr = {
+        'scheme': 'root',
+        'hostname': 'write.example',
+        'impl': write_impl,
+    }
     write_protocol = MagicMock(renaming=True, overwrite=False)
     write_protocol.attributes = {'scheme': 'root'}
     read_protocol = MagicMock()
@@ -104,12 +109,12 @@ def test_upload_item_selects_read_and_delete_implementations_independently(sign_
             rse_attributes={},
             lfn={'scope': 'mock', 'name': 'file', 'filename': 'file', 'filesize': 4},
             source_dir='/tmp',
-            write_impl=write_impl,
+            write_protocol_attr=write_protocol_attr,
             sign_service=sign_service,
         )
 
     assert result == write_pfn
-    assert create.call_args_list[0].kwargs['impl'] == write_impl
+    assert create.call_args_list[0].kwargs['protocol_attr'] is write_protocol_attr
     assert create.call_args_list[1].args[1] == 'read'
     assert create.call_args_list[1].kwargs['impl'] is None
     assert create.call_args_list[1].kwargs['force_scheme'] is None
@@ -297,6 +302,55 @@ def test_bulk_upload_probes_preferred_impl_once_per_rse():
         upload_client.upload([{'path': 'unused'}])
 
     upload_client.preferred_impl.assert_called_once_with(settings, 'wan')
+
+
+def test_upload_preserves_exact_writer_without_forcing_auxiliary_scheme():
+    upload_client = UploadClient.__new__(UploadClient)
+    upload_client.logger = MagicMock()
+    upload_client.client = MagicMock(vo='def')
+    upload_client.client.list_rses.return_value = [{'rse': 'MOCK'}]
+    upload_client.client.list_rse_attributes.return_value = {}
+    upload_client.client_location = None
+    upload_client.auth_token = None
+    upload_client.trace = {}
+    upload_client.tracing = False
+    upload_client.rses = {}
+    upload_client.rse_expressions = {}
+    upload_client.preferred_impl = MagicMock(return_value=None)
+    upload_client._rse_exists = MagicMock(return_value=False)
+    upload_client._upload_item = MagicMock(return_value='root://writer.example//file')
+    writer = {
+        'scheme': 'root',
+        'hostname': 'writer.example',
+        'port': 1094,
+        'prefix': '/',
+        'impl': 'rucio.rse.protocols.xrootd.Default',
+        'domains': {'wan': {'write': 1}},
+    }
+    files = [{
+        'rse': 'MOCK',
+        'basename': 'file',
+        'dirname': '/tmp',
+        'did_scope': 'mock',
+        'did_name': 'file',
+        'bytes': 4,
+        'adler32': 'deadbeef',
+        'no_register': True,
+    }]
+    settings = {
+        'availability_write': 1,
+        'sign_url': None,
+        'deterministic': True,
+        'domain': [],
+    }
+
+    with patch.object(upload_client, '_collect_and_validate_file_info', return_value=files), \
+            patch('rucio.client.uploadclient.rsemgr.get_rse_info', return_value=settings), \
+            patch('rucio.client.uploadclient.rsemgr.get_protocols_ordered', return_value=[writer]):
+        assert upload_client.upload([{'path': 'unused'}]) == 0
+
+    assert upload_client._upload_item.call_args.kwargs['write_protocol_attr'] is writer
+    assert upload_client._upload_item.call_args.kwargs['force_scheme'] is None
 
 
 def test_upload_preflight_falls_back_after_native_failure():

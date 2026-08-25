@@ -264,6 +264,9 @@ def create_protocol(
                 dependency_check = getattr(protocol_instance, 'check_dependencies', None)
                 if dependency_check is not None:
                     dependency_check()
+                credential_preparation = getattr(protocol_instance, 'prepare_credentials', None)
+                if credential_preparation is not None:
+                    credential_preparation()
             return protocol_instance
         except exception.MissingDependency as error:
             if protocol_instance is not None:
@@ -407,7 +410,9 @@ def exists(
             # If not overridden, optionally fall back to a write protocol
             selected_scheme = protocol.attributes['scheme']
             files_to_check = files if isinstance(files, list) else [files]
-            fallback_scheme = selected_scheme if any(isinstance(file, STRING_TYPES) for file in files_to_check) else None
+            fallback_scheme = scheme
+            if fallback_scheme is None and any(isinstance(file, STRING_TYPES) for file in files_to_check):
+                fallback_scheme = selected_scheme
             try:
                 protocol.close()
             except Exception:
@@ -417,6 +422,7 @@ def exists(
                 rse_settings,
                 'write',
                 scheme=fallback_scheme,
+                impl=impl,
                 domain=domain,
                 auth_token=auth_token,
                 logger=logger,
@@ -477,7 +483,33 @@ def upload(
         logger: types.LoggerFunction = logging.log,
         impl: Optional[str] = None,
 ) -> dict[Union[int, str], Union[bool, str, dict[str, Union[Literal[True], Exception]]]]:
-    """Upload while deterministically releasing every partially initialized protocol."""
+    """
+    Upload one or more files while releasing every partially initialized protocol.
+
+    :param rse_settings: RSE attributes.
+    :param lfns: A single LFN dictionary or a list of LFNs containing ``scope``
+                 and ``name``. ``filename`` may identify a different local basename.
+    :param domain: Network domain, either ``wan`` (default) or ``lan``.
+    :param source_dir: Local directory containing the source files.
+    :param force_pfn: Use the given PFN; this can create dark data and should be
+                      used sparingly.
+    :param force_scheme: Force the write protocol scheme, overriding RSE priority.
+    :param transfer_timeout: Transfer timeout in seconds for supporting protocols.
+    :param delete_existing: Remove an existing destination before uploading.
+    :param sign_service: Service used to sign object-store URLs.
+    :param auth_token: Optional JSON Web Token used for authentication.
+    :param vo: VO of the RSE.
+    :param logger: Optional decorated logger for daemon or server callers.
+    :param impl: Optional protocol implementation override.
+
+    :returns: A result dictionary containing the global success state, per-file
+              results, and the final PFN.
+
+    :raises RSENotConnected: No connection to the storage could be established.
+    :raises SourceNotFound: A local source file does not exist.
+    :raises DestinationNotAccessible: The destination is not accessible.
+    :raises ServiceUnavailable: The operation failed for another service reason.
+    """
     protocols_to_close: list["RSEProtocol"] = []
     try:
         return _upload(
@@ -563,7 +595,7 @@ def _upload(
     protocols_to_close.append(protocol)
     protocol.connect()
     protocol_delete = create_protocol(
-        rse_settings, 'delete', scheme=force_scheme, domain=domain, auth_token=auth_token,
+        rse_settings, 'delete', domain=domain, auth_token=auth_token,
         logger=logger, impl=impl, check_dependencies=True,
     )
     protocols_to_close.append(protocol_delete)
@@ -643,7 +675,7 @@ def _upload(
                                 verified_checksums.append(stats[checksum_name] == lfn[checksum_name])
                         # Upload is successful if at least one checksum was found
                         valid = any(verified_checksums)
-                        if not valid and ('filesize' in stats) and ('filesize' in lfn):
+                        if not verified_checksums and ('filesize' in stats) and ('filesize' in lfn):
                             valid = int(stats['filesize']) == int(lfn['filesize'])
                     except NotImplementedError:
                         if rse_settings['verify_checksum'] is False:
@@ -699,7 +731,7 @@ def _upload(
 
                         # Upload is successful if at least one checksum was found
                         valid = any(verified_checksums)
-                        if not valid and ('filesize' in stats) and ('filesize' in lfn):
+                        if not verified_checksums and ('filesize' in stats) and ('filesize' in lfn):
                             valid = int(stats['filesize']) == int(lfn['filesize'])
                     except NotImplementedError:
                         if rse_settings['verify_checksum'] is False:

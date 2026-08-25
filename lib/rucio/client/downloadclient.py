@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from xmlrpc.client import ServerProxy as RPCServerProxy
 
     from rucio.common.constants import SORTING_ALGORITHMS_LITERAL
-    from rucio.common.types import LoggerFunction
+    from rucio.common.types import LoggerFunction, RSEProtocolDict
 
 
 @enum.unique
@@ -800,7 +800,9 @@ class DownloadClient:
                     return False
                 scheme = source['pfn'].split(':', 1)[0]
                 return any(
-                    protocol['scheme'] == scheme and protocol['impl'] == preferred_impl
+                    protocol['scheme'] == scheme
+                    and protocol['impl'] == preferred_impl
+                    and protocol.get('domains', {}).get('wan', {}).get('read') is not None
                     for protocol in rse_settings.get('protocols', [])
                 )
 
@@ -881,33 +883,40 @@ class DownloadClient:
                 logger(logging.INFO, '%sUsing Implementation (impl): %s ' % (log_prefix, impl or preferred_impl))
 
             logger(logging.INFO, '%sUsing PFN: %s' % (log_prefix, pfn))
-            candidate_impls: list[str | None] = [impl]
-            if not impl:
-                candidate_impls = [preferred_impl] if preferred_impl else []
-                if not preferred_impl:
+            candidate_protocols: list[tuple[Optional[str], Optional["RSEProtocolDict"]]] = []
+            if impl:
+                candidate_protocols.append((impl, None))
+            else:
+                ordered_protocols: list["RSEProtocolDict"] = []
+                try:
+                    ordered_protocols = rsemgr.get_protocols_ordered(rse, operation='read', scheme=scheme)
+                except Exception as error:
+                    logger(logging.DEBUG, '%sCould not enumerate fallback protocols: %s' % (log_prefix, error))
+
+                if preferred_impl:
+                    candidate_protocols.extend(
+                        (None, protocol_attr)
+                        for protocol_attr in ordered_protocols
+                        if protocol_attr.get('impl') == preferred_impl
+                    )
+                else:
                     try:
                         default_protocol = rsemgr.select_protocol(rse, operation='read', scheme=scheme)
                     except Exception as error:
                         logger(logging.DEBUG, '%sCould not select the default protocol: %s' % (log_prefix, error))
                     else:
-                        if default_impl := default_protocol.get('impl'):
-                            candidate_impls.append(default_impl)
-                try:
-                    protocols = rsemgr.get_protocols_ordered(rse, operation='read', scheme=scheme)
-                except Exception as error:
-                    logger(logging.DEBUG, '%sCould not enumerate fallback protocols: %s' % (log_prefix, error))
-                    if not candidate_impls:
-                        candidate_impls.append(None)
-                else:
-                    candidate_impls.extend(
-                        protocol_impl
-                        for protocol in protocols
-                        if (protocol_impl := protocol.get('impl')) and protocol_impl not in candidate_impls
-                    )
-                if not candidate_impls:
-                    candidate_impls.append(None)
+                        candidate_protocols.append((None, default_protocol))
 
-            for candidate_impl in candidate_impls:
+                candidate_protocols.extend(
+                    (None, protocol_attr)
+                    for protocol_attr in ordered_protocols
+                    if all(protocol_attr is not selected_attr for _, selected_attr in candidate_protocols)
+                )
+                if not candidate_protocols:
+                    candidate_protocols.append((None, None))
+
+            for candidate_impl, candidate_attr in candidate_protocols:
+                candidate_name = candidate_impl or (candidate_attr or {}).get('impl') or 'default implementation'
                 protocol = None
                 try:
                     try:
@@ -916,13 +925,14 @@ class DownloadClient:
                             operation='read',
                             scheme=scheme,
                             impl=candidate_impl,
+                            protocol_attr=candidate_attr,
                             auth_token=self.auth_token,
                             logger=logger,
                         )
                         protocol.connect()
                     except Exception as error:
                         logger(logging.WARNING, '%sFailed to create protocol for PFN: %s' % (log_prefix, pfn))
-                        logger(logging.DEBUG, 'scheme: %s, impl: %s, exception: %s' % (scheme, candidate_impl, error))
+                        logger(logging.DEBUG, 'scheme: %s, impl: %s, exception: %s' % (scheme, candidate_name, error))
                         trace['stateReason'] = str(error)
                         continue
 
@@ -960,7 +970,7 @@ class DownloadClient:
                                 trace['clientState'] = FileDownloadState.FAIL_VALIDATE
                                 trace['stateReason'] = 'Checksum validation failed: Local checksum: %s, Rucio checksum: %s' % (local_checksum, rucio_checksum)
                         if not success:
-                            logger(logging.WARNING, '%sDownload attempt with %s failed. Try %s/%s' % (log_prefix, candidate_impl or 'default implementation', attempt, retries))
+                            logger(logging.WARNING, '%sDownload attempt with %s failed. Try %s/%s' % (log_prefix, candidate_name, attempt, retries))
                             self._send_trace(trace)
 
                     if success:
@@ -2013,15 +2023,11 @@ class DownloadClient:
             General exception with msg for more details
         """
 
-        preferred_protocols = []
-        checked_rses = []
-        supported_impl = None
-
         try:
             preferred_impls = config_get('download', 'preferred_impl')
         except Exception as error:
             self.logger(logging.INFO, 'No preferred protocol impl in rucio.cfg: %s' % (error))
-            return supported_impl
+            return None
         else:
             configured_impls = preferred_impls
             preferred_impls = []
@@ -2036,49 +2042,51 @@ class DownloadClient:
                 else:
                     preferred_impls.append('rucio.rse.protocols.' + impl + '.Default')
 
+        rse_settings_by_name = []
+        checked_rses = set()
         for source in sources:
-            if source['rse'] in checked_rses:
+            rse_name = source['rse']
+            if rse_name in checked_rses:
                 continue
+            checked_rses.add(rse_name)
             try:
-                rse_settings = rsemgr.get_rse_info(source['rse'], vo=self.client.vo)
-                checked_rses.append(str(source['rse']))
+                rse_settings = rsemgr.get_rse_info(rse_name, vo=self.client.vo)
             except RucioException as error:
-                self.logger(logging.DEBUG, 'Could not get info of RSE %s: %s' % (source['source'], error))
+                self.logger(logging.DEBUG, 'Could not get info of RSE %s: %s' % (rse_name, error))
                 continue
+            rse_settings_by_name.append((rse_name, rse_settings))
 
-            preferred_protocols = []
-            for preferred_impl in preferred_impls:
-                preferred_protocols.extend([
+        for preferred_impl in preferred_impls:
+            for _rse_name, rse_settings in rse_settings_by_name:
+                preferred_protocols = [
                     protocol for protocol in rse_settings['protocols']
-                    if protocol['impl'] == preferred_impl and protocol not in preferred_protocols
-                ])
+                    if protocol['impl'] == preferred_impl
+                    and protocol.get('domains', {}).get('wan', {}).get('read') is not None
+                ]
+                for protocol in preferred_protocols:
+                    supported_protocol = None
+                    try:
+                        supported_protocol = rsemgr.create_protocol(
+                            rse_settings,
+                            'read',
+                            protocol_attr=protocol,
+                            auth_token=self.auth_token,
+                            logger=self.logger,
+                        )
+                        supported_protocol.connect()
+                    except Exception as error:
+                        self.logger(logging.WARNING, 'Failed to create protocol "%s", exception: %s' % (protocol['impl'], error))
+                    else:
+                        self.logger(logging.INFO, 'Preferred protocol impl supported locally and remotely: %s' % (protocol['impl']))
+                        return protocol['impl']
+                    finally:
+                        if supported_protocol is not None:
+                            try:
+                                supported_protocol.close()
+                            except Exception:
+                                self.logger(logging.DEBUG, 'Failed to close preferred protocol probe', exc_info=True)
 
-            if len(preferred_protocols) == 0:
-                continue
-
-            for protocol in preferred_protocols:
-                if protocol['domains']['wan'].get("read") is None:
-                    self.logger(logging.WARNING, 'Unsuitable protocol "%s": "WAN Read" operation is not supported' % (protocol['impl']))
-                    continue
-                supported_protocol = None
-                try:
-                    supported_protocol = rsemgr.create_protocol(rse_settings, 'read', impl=protocol['impl'], auth_token=self.auth_token, logger=self.logger)
-                    supported_protocol.connect()
-                except Exception as error:
-                    self.logger(logging.WARNING, 'Failed to create protocol "%s", exception: %s' % (protocol['impl'], error))
-                    pass
-                else:
-                    self.logger(logging.INFO, 'Preferred protocol impl supported locally and remotely: %s' % (protocol['impl']))
-                    supported_impl = protocol['impl']
-                    break
-                finally:
-                    if supported_protocol is not None:
-                        try:
-                            supported_protocol.close()
-                        except Exception:
-                            self.logger(logging.DEBUG, 'Failed to close preferred protocol probe', exc_info=True)
-
-        return supported_impl
+        return None
 
 
 def _verify_checksum(

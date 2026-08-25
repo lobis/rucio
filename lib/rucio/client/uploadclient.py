@@ -539,8 +539,8 @@ class UploadClient:
                                             source_dir=file['dirname'],
                                             domain=domain,
                                             impl=impl,
-                                            write_impl=protocol.get('impl'),
-                                            force_scheme=cur_scheme,
+                                            write_protocol_attr=protocol,
+                                            force_scheme=force_scheme,
                                             force_pfn=pfn,
                                             transfer_timeout=file.get('transfer_timeout'),
                                             delete_existing=delete_existing,
@@ -1001,6 +1001,7 @@ class UploadClient:
             domain: str = 'wan',
             impl: Optional[str] = None,
             write_impl: Optional[str] = None,
+            write_protocol_attr: Optional["RSEProtocolDict"] = None,
             force_pfn: Optional[str] = None,
             force_scheme: Optional[str] = None,
             transfer_timeout: Optional[int] = None,
@@ -1036,6 +1037,10 @@ class UploadClient:
         write_impl
             Write implementation selected by the upload fallback loop. Read and
             delete operations remain independently selected and may use other schemes.
+        write_protocol_attr
+            Exact write protocol record selected by the upload fallback loop. This
+            preserves endpoint and priority identity when multiple records share an
+            implementation.
         force_pfn
             If provided, forces the use of this PFN for the file location on the storage
             (use with care since it can lead to "dark" data).
@@ -1072,7 +1077,8 @@ class UploadClient:
                                                'write',
                                                force_scheme=force_scheme,
                                                domain=domain,
-                                               impl=write_impl or impl)
+                                               impl=write_impl or impl,
+                                               protocol_attr=write_protocol_attr)
         base_name = lfn.get('filename', lfn['name'])
         name = lfn.get('name', base_name)
         scope = lfn['scope']
@@ -1310,6 +1316,7 @@ class UploadClient:
             force_scheme: Optional[str] = None,
             domain: str = 'wan',
             required_methods: tuple[str, ...] = (),
+            protocol_attr: Optional["RSEProtocolDict"] = None,
     ) -> "RSEProtocol":
         """
         Creates and returns the protocol object for the requested RSE operation.
@@ -1329,6 +1336,9 @@ class UploadClient:
             If provided, forces the protocol to use this scheme.
         domain
             The network domain to be used, defaulting to 'wan'.
+        protocol_attr
+            An exact protocol record to instantiate. When supplied, fallback does
+            not reconstruct the selection from only its scheme and implementation.
 
         Returns
         -------
@@ -1342,7 +1352,9 @@ class UploadClient:
         """
         last_error: Optional[Exception] = None
         candidate_attrs: list[Optional["RSEProtocolDict"]] = []
-        if impl:
+        if protocol_attr is not None:
+            candidate_attrs.append(protocol_attr)
+        elif impl:
             candidate_attrs.append(None)
         else:
             candidate_attrs.extend(self._protocol_candidates(rse_settings, operation, force_scheme, domain))

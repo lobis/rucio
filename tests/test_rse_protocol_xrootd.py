@@ -116,13 +116,16 @@ def _protocol(auth_token=None, x509_proxy=None, credential_id='credential-id'):
     protocol._Default__auth_mode = 'ztn' if auth_token else 'gsi'
     protocol._Default__token_file = None
     protocol._Default__proxy_file = None
+    protocol._Default__cert_file = None
+    protocol._Default__key_file = None
     protocol._Default__worker = None
-    protocol._Default__worker_lock = threading.Lock()
+    protocol._Default__worker_lock = threading.RLock()
     protocol._Default__x509_proxy = x509_proxy
     protocol._Default__x509_cert = None
     protocol._Default__x509_key = None
     protocol._Default__gsi_create_proxy = None
     protocol._Default__credential_id = credential_id
+    protocol._Default__credentials_initialized = True
     return protocol
 
 
@@ -132,6 +135,13 @@ def test_native_xrootd_requires_version_6_or_newer():
     assert xrootd._is_supported_xrootd_version(_XRootDClient('6.0.3'))
     assert xrootd._is_supported_xrootd_version(_XRootDClient('6.1.0'))
     assert xrootd._is_supported_xrootd_version(_XRootDClient('v6.1.0'))
+
+
+def test_native_xrootd_missing_dependency_names_distribution_extra(monkeypatch):
+    monkeypatch.setattr(xrootd, '_xrootd_client', None)
+
+    with pytest.raises(exception.MissingDependency, match="'xrootd' extra for your Rucio distribution"):
+        xrootd._client()
 
 
 def test_rsemanager_falls_back_from_missing_optional_binding(monkeypatch):
@@ -189,14 +199,14 @@ def test_xrootd_url_operations_do_not_require_optional_binding(monkeypatch):
     }
     rse_settings = {
         'rse': 'MOCK',
-        # Keep this URL-only test independent of server-side VO policy
-        # lookups, which require a persisted RSE id.
         'deterministic': False,
         'protocols': [protocol],
     }
     pfn = 'root://example.com:1094/rucio/mock/file'
 
     monkeypatch.setattr(xrootd, '_xrootd_client', None)
+    monkeypatch.setattr(rsemanager, 'CLIENT_MODE', False, raising=False)
+    monkeypatch.setattr(rsemanager, 'SERVER_MODE', False, raising=False)
 
     assert rsemanager.lfns2pfns(
         rse_settings,
@@ -222,6 +232,29 @@ def test_rsemanager_exists_fallback_uses_independent_writer_for_lfn(monkeypatch)
 
     assert not rsemanager.exists({'sign_url': None}, {'scope': 'mock', 'name': 'file'})
     assert create_protocol.call_args_list[1].kwargs['scheme'] is None
+    read_protocol.close.assert_called_once()
+    write_protocol.close.assert_called_once()
+
+
+def test_rsemanager_exists_fallback_preserves_explicit_scheme(monkeypatch):
+    read_protocol = MagicMock()
+    read_protocol.attributes = {'scheme': 'https'}
+    write_protocol = MagicMock()
+    write_protocol.lfns2pfns.return_value = {'mock:file': 'root://example.com//file'}
+    write_protocol.exists.return_value = False
+
+    create_protocol = MagicMock(side_effect=[read_protocol, write_protocol])
+    monkeypatch.setattr(rsemanager, 'create_protocol', create_protocol)
+    monkeypatch.setattr(rsemanager.utils, 'is_method_overridden', lambda *_args, **_kwargs: False)
+
+    assert not rsemanager.exists(
+        {'sign_url': None},
+        {'scope': 'mock', 'name': 'file'},
+        scheme='root',
+        impl='rucio.rse.protocols.gfal.Default',
+    )
+    assert create_protocol.call_args_list[1].kwargs['scheme'] == 'root'
+    assert create_protocol.call_args_list[1].kwargs['impl'] == 'rucio.rse.protocols.gfal.Default'
     read_protocol.close.assert_called_once()
     write_protocol.close.assert_called_once()
 
@@ -592,6 +625,45 @@ def test_native_xrootd_uses_globus_cert_key_fallback(monkeypatch, tmp_path):
     assert protocol._valid_x509_cert_key() == (str(cert), str(key))
 
 
+def test_native_xrootd_url_only_instance_defers_credential_snapshots(monkeypatch, tmp_path):
+    cert = tmp_path / 'usercert.pem'
+    key = tmp_path / 'userkey.pem'
+    cert.write_text('certificate')
+    key.write_text('private key')
+    for variable in ('RUCIO_CLIENT_PROXY', 'X509_USER_PROXY', 'XrdSecGSIUSERPROXY'):
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setenv('X509_USER_CERT', str(cert))
+    monkeypatch.setenv('X509_USER_KEY', str(key))
+
+    protocol_attr = {
+        'scheme': 'root',
+        'hostname': 'example.com',
+        'port': 1094,
+        'prefix': '/rucio/',
+        'impl': 'rucio.rse.protocols.xrootd.Default',
+        'domains': {'wan': {'read': 1}},
+        'auth_token': None,
+    }
+    protocol = xrootd.Default(
+        protocol_attr,
+        {'rse': 'MOCK', 'deterministic': True, 'lfn2pfn_algorithm': 'identity'},
+    )
+    protocol._configured_x509_proxy = lambda: None
+    protocol._default_x509_proxy = lambda: None
+    try:
+        assert protocol._Default__cert_file is None
+        assert protocol._Default__key_file is None
+        protocol.lfns2pfns({'scope': 'mock', 'name': 'file', 'path': 'mock/file'})
+        assert protocol._Default__cert_file is None
+        assert protocol._Default__key_file is None
+
+        protocol._authenticated_url('root://example.com//file')
+        assert protocol._Default__cert_file is not None
+        assert protocol._Default__key_file is not None
+    finally:
+        protocol.close()
+
+
 def test_native_xrootd_worker_preserves_gsi_create_proxy_policy(monkeypatch):
     captured = {}
     process = MagicMock()
@@ -882,6 +954,49 @@ def test_rsemanager_upload_normalizes_filesize_for_renaming(monkeypatch):
     write_protocol.rename.assert_called_once_with('%s.rucio.upload' % pfn, pfn)
 
 
+def test_rsemanager_upload_selects_delete_scheme_independently(monkeypatch):
+    write_protocol = MagicMock(renaming=False, overwrite=True)
+    delete_protocol = MagicMock()
+    pfn = 'root://example.com//file'
+    write_protocol.lfns2pfns.return_value = {'mock:file': pfn}
+    write_protocol.stat.return_value = {'filesize': 4, 'adler32': 'deadbeef'}
+
+    create_protocol = MagicMock(side_effect=[write_protocol, delete_protocol])
+    monkeypatch.setattr(rsemanager, 'create_protocol', create_protocol)
+
+    result = rsemanager.upload(
+        rse_settings={'rse': 'MOCK', 'verify_checksum': True},
+        lfns={'scope': 'mock', 'name': 'file', 'filesize': 4, 'adler32': 'deadbeef'},
+        source_dir='/tmp',
+        force_scheme='root',
+    )
+
+    assert result['success'] is True
+    assert create_protocol.call_args_list[0].kwargs['scheme'] == 'root'
+    assert create_protocol.call_args_list[1].kwargs.get('scheme') is None
+
+
+def test_rsemanager_upload_does_not_replace_checksum_mismatch_with_filesize(monkeypatch):
+    write_protocol = MagicMock(renaming=False, overwrite=True)
+    delete_protocol = MagicMock()
+    pfn = 'root://example.com//file'
+    write_protocol.lfns2pfns.return_value = {'mock:file': pfn}
+    write_protocol.stat.return_value = {'filesize': '4', 'adler32': 'badc0ffe'}
+
+    monkeypatch.setattr(
+        rsemanager,
+        'create_protocol',
+        MagicMock(side_effect=[write_protocol, delete_protocol]),
+    )
+
+    with pytest.raises(exception.RucioException, match='corrupted'):
+        rsemanager.upload(
+            rse_settings={'rse': 'MOCK', 'verify_checksum': True},
+            lfns={'scope': 'mock', 'name': 'file', 'filesize': 4, 'adler32': 'deadbeef'},
+            source_dir='/tmp',
+        )
+
+
 @pytest.mark.noparallel(reason='creates and removes a test directory with a fixed name')
 @skip_rse_tests_with_accounts
 class TestRseXROOTD(MgrTestCases):
@@ -916,19 +1031,22 @@ class TestRseXROOTD(MgrTestCases):
         rse_settings, tmpdir, user = cls.setup_common_test_env(rse_name, vo, tmp_path_factory)
 
         protocol = rsemanager.create_protocol(rse_settings, 'write')
-        protocol.connect()
+        try:
+            protocol.connect()
 
-        os.system('dd if=/dev/urandom of=%s/data.raw bs=1024 count=1024' % prefix)
+            os.system('dd if=/dev/urandom of=%s/data.raw bs=1024 count=1024' % prefix)
 
-        for f in cls.files_remote:
-            path = protocol.path2pfn(prefix + protocol._get_path('user.%s' % user, f))
-            cmd = 'xrdcp %s/data.raw %s' % (prefix, path)
-            execute(cmd)
+            for f in cls.files_remote:
+                path = protocol.path2pfn(prefix + protocol._get_path('user.%s' % user, f))
+                cmd = 'xrdcp %s/data.raw %s' % (prefix, path)
+                execute(cmd)
 
-        for f in MgrTestCases.files_local_and_remote:
-            path = protocol.path2pfn(prefix + protocol._get_path('user.%s' % user, f))
-            cmd = 'xrdcp %s/%s %s' % (tmpdir, f, path)
-            execute(cmd)
+            for f in MgrTestCases.files_local_and_remote:
+                path = protocol.path2pfn(prefix + protocol._get_path('user.%s' % user, f))
+                cmd = 'xrdcp %s/%s %s' % (tmpdir, f, path)
+                execute(cmd)
+        finally:
+            protocol.close()
 
         yield rse_settings, tmpdir, user
 

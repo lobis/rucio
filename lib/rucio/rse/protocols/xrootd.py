@@ -245,7 +245,8 @@ except Exception:
 def _client() -> ModuleType:
     if _xrootd_client is None:
         raise exception.MissingDependency(
-            "Missing dependency: xrootd. Install 'rucio-clients[xrootd]' for native XRootD transfers."
+            "Missing dependency: xrootd. Install the 'xrootd' extra for your Rucio distribution "
+            "to enable native XRootD transfers."
         )
     return _xrootd_client
 
@@ -278,27 +279,23 @@ class Default(protocol.RSEProtocol):
         self.__proxy_file: Any | None = None
         self.__cert_file: Any | None = None
         self.__key_file: Any | None = None
-        self.__worker_lock = threading.Lock()
+        self.__worker_lock = threading.RLock()
         self.__auth_mode = 'ztn' if self.auth_token else 'gsi'
         self.__gsi_create_proxy = os.environ.get('XrdSecGSICREATEPROXY') if self.__auth_mode == 'gsi' else None
-        selected_proxy = None if self.__auth_mode == 'ztn' else self._valid_x509_proxy()
-        self.__x509_proxy = self._snapshot_x509_proxy(selected_proxy)
-        selected_cert, selected_key = (None, None)
-        if self.__auth_mode == 'gsi' and selected_proxy is None:
-            selected_cert, selected_key = self._valid_x509_cert_key()
-        self.__x509_cert = self._snapshot_x509_cert(selected_cert)
-        self.__x509_key = self._snapshot_x509_key(selected_key)
-        self.__credential_id = self._gsi_credential_id(
-            self.__x509_proxy,
-            self.__x509_cert,
-            self.__x509_key,
-            self.__gsi_create_proxy,
-        )
+        self.__x509_proxy: str | None = None
+        self.__x509_cert: str | None = None
+        self.__x509_key: str | None = None
+        self.__credential_id: str | None = None
+        self.__credentials_initialized = False
         self.__worker: _CredentialWorker | None = None
 
     def check_dependencies(self) -> None:
         """Validate the optional native transport without affecting URL-only operations."""
         _client()
+
+    def prepare_credentials(self) -> None:
+        """Pin credentials for a protocol selected for native I/O."""
+        self._ensure_credentials()
 
     @property
     def _endpoint(self) -> str:
@@ -476,11 +473,33 @@ class Default(protocol.RSEProtocol):
             self.__token_file = token_file
         return self.__token_file.name
 
+    def _ensure_credentials(self) -> None:
+        """Snapshot the selected identity only when a native operation needs it."""
+        with self.__worker_lock:
+            if self.__credentials_initialized:
+                return
+
+            selected_proxy = None if self.__auth_mode == 'ztn' else self._valid_x509_proxy()
+            self.__x509_proxy = self._snapshot_x509_proxy(selected_proxy)
+            selected_cert, selected_key = (None, None)
+            if self.__auth_mode == 'gsi' and selected_proxy is None:
+                selected_cert, selected_key = self._valid_x509_cert_key()
+            self.__x509_cert = self._snapshot_x509_cert(selected_cert)
+            self.__x509_key = self._snapshot_x509_key(selected_key)
+            self.__credential_id = self._gsi_credential_id(
+                self.__x509_proxy,
+                self.__x509_cert,
+                self.__x509_key,
+                self.__gsi_create_proxy,
+            )
+            self.__credentials_initialized = True
+
     def _authenticated_url(self, url: str) -> str:
         parsed = urlsplit(url)
         if parsed.scheme not in ('root', 'xroot'):
             return url
 
+        self._ensure_credentials()
         query = dict(parse_qsl(parsed.query, keep_blank_values=True))
         auth_mode = getattr(self, '_Default__auth_mode', 'ztn' if self.auth_token else 'gsi')
         if auth_mode == 'ztn':
@@ -513,9 +532,10 @@ class Default(protocol.RSEProtocol):
 
     def _run_isolated(self, request: dict[str, Any]) -> dict[str, Any]:
         _client()
+        self._ensure_credentials()
         worker_lock = getattr(self, '_Default__worker_lock', None)
         if worker_lock is None:
-            worker_lock = threading.Lock()
+            worker_lock = threading.RLock()
             self.__worker_lock = worker_lock
         with worker_lock:
             worker = getattr(self, '_Default__worker', None)
