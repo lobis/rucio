@@ -910,7 +910,7 @@ class DownloadClient:
                 candidate_protocols.extend(
                     (None, protocol_attr)
                     for protocol_attr in ordered_protocols
-                    if all(protocol_attr is not selected_attr for _, selected_attr in candidate_protocols)
+                    if all(protocol_attr != selected_attr for _, selected_attr in candidate_protocols)
                 )
                 if not candidate_protocols:
                     candidate_protocols.append((None, None))
