@@ -626,6 +626,9 @@ def test_native_xrootd_uses_globus_cert_key_fallback(monkeypatch, tmp_path):
 
 
 def test_native_xrootd_url_only_instance_defers_credential_snapshots(monkeypatch, tmp_path):
+    monkeypatch.setattr(rsemanager, 'CLIENT_MODE', False, raising=False)
+    monkeypatch.setattr(rsemanager, 'SERVER_MODE', False, raising=False)
+
     cert = tmp_path / 'usercert.pem'
     key = tmp_path / 'userkey.pem'
     cert.write_text('certificate')
@@ -646,7 +649,7 @@ def test_native_xrootd_url_only_instance_defers_credential_snapshots(monkeypatch
     }
     protocol = xrootd.Default(
         protocol_attr,
-        {'rse': 'MOCK', 'deterministic': True, 'lfn2pfn_algorithm': 'identity'},
+        {'rse': 'MOCK', 'deterministic': False},
     )
     protocol._configured_x509_proxy = lambda: None
     protocol._default_x509_proxy = lambda: None
