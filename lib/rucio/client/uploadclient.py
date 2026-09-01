@@ -23,9 +23,11 @@ import socket
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Optional, Union, cast
+from urllib.parse import urlsplit
 
 from rucio import version
 from rucio.client.client import Client
+from rucio.common import utils
 from rucio.common.bittorrent import bittorrent_v2_merkle_sha256
 from rucio.common.checksum import GLOBALLY_SUPPORTED_CHECKSUMS, adler32, md5
 from rucio.common.client import detect_client_location
@@ -48,12 +50,27 @@ from rucio.common.exception import (
 )
 from rucio.common.utils import execute, generate_uuid, make_valid_did, retry, send_trace
 from rucio.rse import rsemanager as rsemgr
+from rucio.rse.protocols.protocol import RSEProtocol
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
-    from rucio.common.types import AttachDict, DatasetDict, DIDStringDict, FileToUploadDict, FileToUploadWithCollectedAndDatasetInfoDict, FileToUploadWithCollectedInfoDict, LFNDict, LoggerFunction, PathTypeAlias, RSESettingsDict, TraceBaseDict, TraceDict
-    from rucio.rse.protocols.protocol import RSEProtocol
+    from rucio.common.constants import RSE_ALL_SUPPORTED_PROTOCOL_OPERATIONS_LITERAL
+    from rucio.common.types import (
+        AttachDict,
+        DatasetDict,
+        DIDStringDict,
+        FileToUploadDict,
+        FileToUploadWithCollectedAndDatasetInfoDict,
+        FileToUploadWithCollectedInfoDict,
+        LFNDict,
+        LoggerFunction,
+        PathTypeAlias,
+        RSEProtocolDict,
+        RSESettingsDict,
+        TraceBaseDict,
+        TraceDict,
+    )
 
 
 class UploadClient:
@@ -378,6 +395,7 @@ class UploadClient:
         registered_dataset_dids = set()
         num_succeeded = 0
         summary = []
+        preferred_impl_cache: dict[tuple[str, str], Optional[str]] = {}
         for file in files:
             basename = file['basename']
             logger(logging.INFO, 'Preparing upload for file %s' % basename)
@@ -426,11 +444,12 @@ class UploadClient:
                     domain = 'lan'
             logger(logging.DEBUG, '{} domain is used for the upload'.format(domain))
 
-            # FIXME:
-            # Rewrite preferred_impl selection - also check test_upload.py/test_download.py and fix impl order (see FIXME there)
-            #
-            # if not impl and not force_scheme:
-            #    impl = self.preferred_impl(rse_settings, domain)
+            preferred_impl = None
+            if not impl and not force_scheme:
+                preference_key = (rse, domain)
+                if preference_key not in preferred_impl_cache:
+                    preferred_impl_cache[preference_key] = self.preferred_impl(rse_settings, domain)
+                preferred_impl = preferred_impl_cache[preference_key]
 
             if not no_register and not register_after_upload:
                 self._register_file(file,
@@ -441,14 +460,11 @@ class UploadClient:
             # if register_after_upload, the file should be overwritten if it is not registered,
             # otherwise if the file already exists on RSE we're done
             if register_after_upload:
-                if rsemgr.exists(rse_settings,
-                                 pfn if pfn else file_did,  # type: ignore (pfn is str)
-                                 domain=domain,
-                                 scheme=force_scheme,
-                                 impl=impl,
-                                 auth_token=self.auth_token,
-                                 vo=self.client.vo,
-                                 logger=logger):
+                if self._rse_exists(rse_settings,
+                                    pfn if pfn else file_did,  # type: ignore (pfn is str)
+                                    domain=domain,
+                                    scheme=force_scheme,
+                                    impl=impl):
                     try:
                         self.client.get_did(file['did_scope'], file['did_name'])
                         logger(logging.INFO, 'File already registered. Skipping upload.')
@@ -458,38 +474,29 @@ class UploadClient:
                         logger(logging.INFO, 'File already exists on RSE. Previous left overs will be overwritten.')
                         delete_existing = True
             elif not is_deterministic and not no_register:
-                if rsemgr.exists(rse_settings,
-                                 pfn,  # type: ignore (pfn is str)
-                                 domain=domain,
-                                 scheme=force_scheme,
-                                 impl=impl,
-                                 auth_token=self.auth_token,
-                                 vo=self.client.vo,
-                                 logger=logger):
+                if self._rse_exists(rse_settings,
+                                    pfn,  # type: ignore (pfn is str)
+                                    domain=domain,
+                                    scheme=force_scheme,
+                                    impl=impl):
                     logger(logging.INFO,
                            'File already exists on RSE with given pfn. Skipping upload. Existing replica has to be removed first.')
                     trace['stateReason'] = 'File already exists'
                     continue
-                elif rsemgr.exists(rse_settings,
-                                   file_did,
-                                   domain=domain,
-                                   scheme=force_scheme,
-                                   impl=impl,
-                                   auth_token=self.auth_token,
-                                   vo=self.client.vo,
-                                   logger=logger):
+                elif self._rse_exists(rse_settings,
+                                      file_did,
+                                      domain=domain,
+                                      scheme=force_scheme,
+                                      impl=impl):
                     logger(logging.INFO, 'File already exists on RSE with different pfn. Skipping upload.')
                     trace['stateReason'] = 'File already exists'
                     continue
             else:
-                if rsemgr.exists(rse_settings,
-                                 pfn if pfn else file_did,  # type: ignore (pfn is str)
-                                 domain=domain,
-                                 scheme=force_scheme,
-                                 impl=impl,
-                                 auth_token=self.auth_token,
-                                 vo=self.client.vo,
-                                 logger=logger):
+                if self._rse_exists(rse_settings,
+                                    pfn if pfn else file_did,  # type: ignore (pfn is str)
+                                    domain=domain,
+                                    scheme=force_scheme,
+                                    impl=impl):
                     logger(logging.INFO, 'File already exists on RSE. Skipping upload')
                     trace['stateReason'] = 'File already exists'
                     continue
@@ -500,6 +507,8 @@ class UploadClient:
                                                      scheme=force_scheme,
                                                      domain=domain,
                                                      impl=impl)
+            if preferred_impl and len(protocols) > 1:
+                protocols.sort(key=lambda p: p.get('impl') != preferred_impl)
             protocols.reverse()
             success = False
             state_reason = ''
@@ -518,9 +527,7 @@ class UploadClient:
 
                 lfn['filesize'] = file['bytes']
 
-                sign_service = None
-                if cur_scheme == 'https':
-                    sign_service = rse_sign_service
+                sign_service = rse_sign_service
 
                 trace['protocol'] = cur_scheme
                 trace['transferStart'] = time.time()
@@ -532,7 +539,8 @@ class UploadClient:
                                             source_dir=file['dirname'],
                                             domain=domain,
                                             impl=impl,
-                                            force_scheme=cur_scheme,
+                                            write_protocol_attr=protocol,
+                                            force_scheme=force_scheme,
                                             force_pfn=pfn,
                                             transfer_timeout=file.get('transfer_timeout'),
                                             delete_existing=delete_existing,
@@ -992,6 +1000,8 @@ class UploadClient:
             source_dir: Optional[str] = None,
             domain: str = 'wan',
             impl: Optional[str] = None,
+            write_impl: Optional[str] = None,
+            write_protocol_attr: Optional["RSEProtocolDict"] = None,
             force_pfn: Optional[str] = None,
             force_scheme: Optional[str] = None,
             transfer_timeout: Optional[int] = None,
@@ -1022,7 +1032,15 @@ class UploadClient:
         domain
             Network domain for the upload, commonly 'wan' for wide-area networks.
         impl
-            Name of the protocol implementation to be enforced (if any).
+            Name of the protocol implementation explicitly enforced by the user
+            for all operations (if any).
+        write_impl
+            Write implementation selected by the upload fallback loop. Read and
+            delete operations remain independently selected and may use other schemes.
+        write_protocol_attr
+            Exact write protocol record selected by the upload fallback loop. This
+            preserves endpoint and priority identity when multiple records share an
+            implementation.
         force_pfn
             If provided, forces the use of this PFN for the file location on the storage
             (use with care since it can lead to "dark" data).
@@ -1053,14 +1071,14 @@ class UploadClient:
 
         logger = self.logger
 
-        # Construct protocol for write operation.
-        # IMPORTANT: All upload stat() checks are always done with the write_protocol EXCEPT for cloud resources (signed URL for write cannot be used for read)
+        # Construct the selected write protocol first. Read and delete protocols
+        # are selected independently and generate PFNs from their own records.
         protocol_write = self._create_protocol(rse_settings,
                                                'write',
                                                force_scheme=force_scheme,
                                                domain=domain,
-                                               impl=impl)
-
+                                               impl=write_impl or impl,
+                                               protocol_attr=write_protocol_attr)
         base_name = lfn.get('filename', lfn['name'])
         name = lfn.get('name', base_name)
         scope = lfn['scope']
@@ -1071,7 +1089,6 @@ class UploadClient:
 
         # Getting pfn
         pfn = None
-        signed_read_pfn = None
         try:
             pfn = list(protocol_write.lfns2pfns(make_valid_did(lfn)).values())[0]
             logger(logging.DEBUG, 'The PFN created from the LFN: {}'.format(pfn))
@@ -1082,67 +1099,97 @@ class UploadClient:
             pfn = force_pfn
             logger(logging.DEBUG, 'The given PFN is used: {}'.format(pfn))
 
-        # Auth. mostly for object stores
-        if sign_service:
-            protocol_read = self._create_protocol(rse_settings,
-                                                  'read',
-                                                  domain=domain,
-                                                  impl=impl)
-            if pfn is not None:
-                signed_read_pfn = self.client.get_signed_url(rse_settings['rse'], sign_service, 'read', pfn)
-                pfn = self.client.get_signed_url(rse_settings['rse'], sign_service, 'write', pfn)
+        skip_upload_stat = rse_attributes.get(RseAttr.SKIP_UPLOAD_STAT, False)
+        required_read_methods = ('exists',) if skip_upload_stat else ('exists', 'stat')
+        try:
+            protocol_read = self._create_protocol_for_methods(
+                rse_settings,
+                required_methods=required_read_methods,
+                force_scheme=force_scheme,
+                domain=domain,
+                impl=impl,
+            )
+        except Exception:
+            self._close_protocols(protocol_write)
+            raise
 
-        # Create a name of tmp file if the renaming operation is supported
-        pfn_tmp = cast("str", '%s.rucio.upload' % pfn if protocol_write.renaming else pfn)
-        signed_read_pfn_tmp = '%s.rucio.upload' % signed_read_pfn if protocol_write.renaming else signed_read_pfn
+        try:
+            if force_pfn:
+                read_pfn = force_pfn
+            else:
+                read_pfn = list(protocol_read.lfns2pfns(make_valid_did(lfn)).values())[0]
+                logger(logging.DEBUG, 'The read PFN created from the LFN: %s', read_pfn)
+        except Exception:
+            self._close_protocols(protocol_read, protocol_write)
+            raise
 
-        # Either DID exists or not register_after_upload
-        if protocol_write.overwrite is False and delete_existing is False:
-            if sign_service:
-                # Construct protocol for read-ONLY for cloud resources and get signed URL for GET
-                if protocol_read.exists(signed_read_pfn):
-                    raise FileReplicaAlreadyExists('File %s in scope %s already exists on storage as PFN %s' % (name, scope, pfn))  # wrong exception?
-            elif protocol_write.exists(pfn):
+        try:
+            # Auth. mostly for object stores
+            read_pfn = self._sign_pfn(rse_settings, sign_service, 'read', read_pfn)
+            pfn = self._sign_pfn(rse_settings, sign_service, 'write', pfn)
+
+            # Create a name of tmp file if the renaming operation is supported
+            pfn_tmp = cast("str", '%s.rucio.upload' % pfn if protocol_write.renaming else pfn)
+            read_pfn_tmp = cast("str", '%s.rucio.upload' % read_pfn if protocol_write.renaming else read_pfn)
+
+            final_exists = (
+                protocol_write.overwrite is False
+                and delete_existing is False
+                and protocol_read.exists(read_pfn)
+            )
+            if final_exists:
                 raise FileReplicaAlreadyExists(
-                    'File %s in scope %s already exists on storage as PFN %s' % (name, scope, pfn))  # wrong exception?
+                    'File %s in scope %s already exists on storage as PFN %s' % (name, scope, pfn))
+            temporary_exists = protocol_read.exists(read_pfn_tmp)
+        except Exception:
+            self._close_protocols(protocol_read, protocol_write)
+            raise
 
         # Removing tmp from earlier attempts
-        if (not sign_service and protocol_write.exists(pfn_tmp)) or (
-                sign_service and protocol_read.exists(signed_read_pfn_tmp)):
+        if temporary_exists:
             logger(logging.DEBUG, 'Removing remains of previous upload attempts.')
+            protocol_delete = None
             try:
                 # Construct protocol for delete operation.
                 protocol_delete = self._create_protocol(rse_settings,
                                                         'delete',
                                                         force_scheme=force_scheme,
                                                         domain=domain,
-                                                        impl=impl)
-                delete_pfn = '%s.rucio.upload' % list(protocol_delete.lfns2pfns(make_valid_did(lfn)).values())[0]
-                if sign_service:
-                    delete_pfn = self.client.get_signed_url(rse_settings['rse'], sign_service, 'delete', delete_pfn)
+                                                        impl=impl,
+                                                        required_methods=('delete',))
+                delete_pfn = force_pfn or list(protocol_delete.lfns2pfns(make_valid_did(lfn)).values())[0]
+                delete_pfn = '%s.rucio.upload' % delete_pfn
+                delete_pfn = cast("str", self._sign_pfn(rse_settings, sign_service, 'delete', delete_pfn))
                 protocol_delete.delete(delete_pfn)
-                protocol_delete.close()
             except Exception as error:
+                self._close_protocols(protocol_read, protocol_write)
                 raise RSEOperationNotSupported(
                     'Unable to remove temporary file %s.rucio.upload: %s' % (pfn, str(error)))
+            finally:
+                if protocol_delete is not None:
+                    self._close_protocols(protocol_delete)
 
         # Removing not registered files from earlier attempts
         if delete_existing:
             logger(logging.DEBUG, 'Removing not-registered remains of previous upload attempts.')
+            protocol_delete = None
             try:
                 # Construct protocol for delete operation.
                 protocol_delete = self._create_protocol(rse_settings,
                                                         'delete',
                                                         force_scheme=force_scheme,
                                                         domain=domain,
-                                                        impl=impl)
-                delete_pfn = '%s' % list(protocol_delete.lfns2pfns(make_valid_did(lfn)).values())[0]
-                if sign_service:
-                    delete_pfn = self.client.get_signed_url(rse_settings['rse'], sign_service, 'delete', delete_pfn)
+                                                        impl=impl,
+                                                        required_methods=('delete',))
+                delete_pfn = force_pfn or list(protocol_delete.lfns2pfns(make_valid_did(lfn)).values())[0]
+                delete_pfn = cast("str", self._sign_pfn(rse_settings, sign_service, 'delete', delete_pfn))
                 protocol_delete.delete(delete_pfn)
-                protocol_delete.close()
             except Exception as error:
+                self._close_protocols(protocol_read, protocol_write)
                 raise RSEOperationNotSupported('Unable to remove file %s: %s' % (pfn, str(error)))
+            finally:
+                if protocol_delete is not None:
+                    self._close_protocols(protocol_delete)
 
         # Process the upload of the tmp file
         try:
@@ -1156,16 +1203,16 @@ class UploadClient:
             )
             logger(logging.INFO, 'Successful upload of temporary file. {}'.format(pfn_tmp))
         except Exception as error:
+            self._close_protocols(protocol_read, protocol_write)
             raise RSEOperationNotSupported(str(error))
 
         # Is stat after that upload allowed?
-        skip_upload_stat = rse_attributes.get(RseAttr.SKIP_UPLOAD_STAT, False)
         self.logger(logging.DEBUG, 'skip_upload_stat=%s', skip_upload_stat)
 
         # Checksum verification, obsolete, see Gabriele changes.
         if not skip_upload_stat:
             try:
-                stats = self._retry_protocol_stat(protocol_write, pfn_tmp)
+                stats = self._retry_protocol_stat(protocol_read, read_pfn_tmp)
                 if not isinstance(stats, dict):
                     raise RucioException('Could not get protocol.stats for given PFN: %s' % pfn)
 
@@ -1184,6 +1231,7 @@ class UploadClient:
                                 'Checksum mismatch. Source: %s Destination: %s' % (lfn['adler32'], stats['adler32']))
 
             except Exception as error:
+                self._close_protocols(protocol_read, protocol_write)
                 raise error
 
         # The upload finished successfully and the file can be renamed
@@ -1192,11 +1240,19 @@ class UploadClient:
                 logger(logging.DEBUG, 'Renaming file %s to %s' % (pfn_tmp, pfn))
                 protocol_write.rename(pfn_tmp, pfn)  # type: ignore (pfn might be None)
         except Exception:
+            self._close_protocols(protocol_read, protocol_write)
             raise RucioException('Unable to rename the tmp file %s.' % pfn_tmp)
 
-        protocol_write.close()
+        self._close_protocols(protocol_read, protocol_write)
 
         return pfn
+
+    def _close_protocols(self, *protocols: "RSEProtocol") -> None:
+        for protocol_to_close in protocols:
+            try:
+                protocol_to_close.close()
+            except Exception:
+                self.logger(logging.DEBUG, 'Failed to close upload protocol', exc_info=True)
 
     def _retry_protocol_stat(
             self,
@@ -1255,10 +1311,12 @@ class UploadClient:
     def _create_protocol(
             self,
             rse_settings: "RSESettingsDict",
-            operation: str,
+            operation: "RSE_ALL_SUPPORTED_PROTOCOL_OPERATIONS_LITERAL",
             impl: Optional[str] = None,
             force_scheme: Optional[str] = None,
-            domain: str = 'wan'
+            domain: str = 'wan',
+            required_methods: tuple[str, ...] = (),
+            protocol_attr: Optional["RSEProtocolDict"] = None,
     ) -> "RSEProtocol":
         """
         Creates and returns the protocol object for the requested RSE operation.
@@ -1278,6 +1336,9 @@ class UploadClient:
             If provided, forces the protocol to use this scheme.
         domain
             The network domain to be used, defaulting to 'wan'.
+        protocol_attr
+            An exact protocol record to instantiate. When supplied, fallback does
+            not reconstruct the selection from only its scheme and implementation.
 
         Returns
         -------
@@ -1289,22 +1350,177 @@ class UploadClient:
         Exception
             If the protocol creation or connection attempt fails.
         """
+        last_error: Optional[Exception] = None
+        candidate_attrs: list[Optional["RSEProtocolDict"]] = []
+        if protocol_attr is not None:
+            candidate_attrs.append(protocol_attr)
+        elif impl:
+            candidate_attrs.append(None)
+        else:
+            candidate_attrs.extend(self._protocol_candidates(rse_settings, operation, force_scheme, domain))
+            if not candidate_attrs:
+                candidate_attrs.append(None)
+        for candidate_attr in candidate_attrs:
+            candidate_impl = impl if candidate_attr is None else None
+            candidate_name = candidate_attr.get('impl') if candidate_attr is not None else candidate_impl
+            protocol = None
+            try:
+                protocol = rsemgr.create_protocol(
+                    rse_settings,
+                    operation,
+                    scheme=force_scheme,
+                    domain=domain,
+                    impl=candidate_impl,
+                    protocol_attr=candidate_attr,
+                    auth_token=self.auth_token,
+                    logger=self.logger,
+                    check_dependencies=True,
+                )
+                if any(not utils.is_method_overridden(protocol, RSEProtocol, method) for method in required_methods):
+                    raise RSEOperationNotSupported(
+                        'Protocol %s does not implement required methods: %s'
+                        % (candidate_name, ', '.join(required_methods))
+                    )
+                protocol.connect()
+                return protocol
+            except Exception as error:
+                last_error = error
+                self.logger(logging.WARNING, 'Failed to create protocol for operation: %s' % operation)
+                self.logger(logging.DEBUG, 'scheme: %s, impl: %s, exception: %s' % (force_scheme, candidate_name, error))
+                if protocol is not None:
+                    self._close_protocols(protocol)
+
+        if last_error is not None:
+            raise last_error
+        raise RSEOperationNotSupported('No protocol candidates for operation %s' % operation)
+
+    def _create_protocol_for_methods(
+            self,
+            rse_settings: "RSESettingsDict",
+            required_methods: tuple[str, ...],
+            impl: Optional[str] = None,
+            force_scheme: Optional[str] = None,
+            domain: str = 'wan',
+    ) -> "RSEProtocol":
+        """Select a read-capable protocol, then an independently capable writer."""
+        read_error: Optional[Exception] = None
         try:
-            protocol = rsemgr.create_protocol(
+            return self._create_protocol(
                 rse_settings,
-                operation,
-                scheme=force_scheme,
-                domain=domain,
+                'read',
                 impl=impl,
-                auth_token=self.auth_token,
-                logger=self.logger
+                force_scheme=force_scheme,
+                domain=domain,
+                required_methods=required_methods,
             )
-            protocol.connect()
         except Exception as error:
-            self.logger(logging.WARNING, 'Failed to create protocol for operation: %s' % operation)
-            self.logger(logging.DEBUG, 'scheme: %s, exception: %s' % (force_scheme, error))
-            raise error
-        return protocol
+            read_error = error
+
+        try:
+            return self._create_protocol(
+                rse_settings,
+                'write',
+                impl=impl,
+                force_scheme=force_scheme,
+                domain=domain,
+                required_methods=required_methods,
+            )
+        except Exception:
+            if read_error is not None:
+                raise read_error
+            raise
+
+    def _sign_pfn(
+            self,
+            rse_settings: "RSESettingsDict",
+            sign_service: Optional[str],
+            operation: str,
+            pfn: Optional[str],
+    ) -> Optional[str]:
+        """Sign only HTTPS PFNs belonging to the selected operation protocol."""
+        if sign_service and pfn is not None and urlsplit(pfn).scheme == 'https':
+            return self.client.get_signed_url(rse_settings['rse'], sign_service, operation, pfn)
+        return pfn
+
+    def _protocol_candidates(
+            self,
+            rse_settings: "RSESettingsDict",
+            operation: "RSE_ALL_SUPPORTED_PROTOCOL_OPERATIONS_LITERAL",
+            scheme: Optional[str],
+            domain: str,
+    ) -> list["RSEProtocolDict"]:
+        candidate_protocols: list["RSEProtocolDict"] = []
+        try:
+            default_protocol = rsemgr.select_protocol(
+                rse_settings,
+                operation=operation,
+                scheme=scheme,
+                domain=domain,
+            )
+        except Exception as error:
+            self.logger(logging.DEBUG, 'Could not select default %s protocol: %s' % (operation, error))
+        else:
+            candidate_protocols.append(default_protocol)
+
+        try:
+            ordered_protocols = rsemgr.get_protocols_ordered(
+                rse_settings,
+                operation=operation,
+                scheme=scheme,
+                domain=domain,
+            )
+        except Exception as error:
+            self.logger(logging.DEBUG, 'Could not enumerate %s protocols: %s' % (operation, error))
+        else:
+            candidate_protocols.extend(
+                protocol
+                for protocol in ordered_protocols
+                if protocol not in candidate_protocols
+            )
+        return candidate_protocols
+
+    def _rse_exists(
+            self,
+            rse_settings: "RSESettingsDict",
+            file_or_did: Any,
+            domain: str,
+            scheme: Optional[str],
+            impl: Optional[str],
+    ) -> bool:
+        last_error: Optional[Exception] = None
+        candidate_attrs: list[Optional["RSEProtocolDict"]] = []
+        if impl:
+            candidate_attrs.append(None)
+        else:
+            candidate_attrs.extend(self._protocol_candidates(rse_settings, 'read', scheme, domain))
+            if not candidate_attrs:
+                candidate_attrs.append(None)
+        for candidate_attr in candidate_attrs:
+            candidate_impl = impl if candidate_attr is None else None
+            candidate_name = candidate_attr.get('impl') if candidate_attr is not None else candidate_impl
+            try:
+                return bool(rsemgr.exists(
+                    rse_settings,
+                    file_or_did,
+                    domain=domain,
+                    scheme=scheme,
+                    impl=candidate_impl,
+                    protocol_attr=candidate_attr,
+                    auth_token=self.auth_token,
+                    vo=self.client.vo,
+                    logger=self.logger,
+                ))
+            except Exception as error:
+                last_error = error
+                self.logger(
+                    logging.WARNING,
+                    'Exists check failed with implementation %s; trying the next configured implementation' % candidate_name,
+                )
+                self.logger(logging.DEBUG, str(error), exc_info=True)
+
+        if last_error is not None:
+            raise last_error
+        return False
 
     def _send_trace(
             self,
@@ -1433,14 +1649,14 @@ class UploadClient:
             domain: str
     ) -> Optional[str]:
         """
-        Select a suitable protocol implementation for read, write, and delete operations on
-        the given RSE and domain.
+        Select a suitable write protocol implementation on the given RSE and domain.
 
         This method checks the local client configuration (under the `[upload] preferred_impl`
         setting) and compares it against the list of protocols declared in `rse_settings`.
-        It attempts to find a protocol that supports the required I/O operations (read,
-        write, delete) in the specified domain. If multiple preferred protocols are listed
-        in the config, it iterates in order and returns the first viable match.
+        It attempts to find a configured protocol that supports writes in the specified
+        domain. Read and delete implementations are selected independently when needed.
+        If multiple preferred protocols are listed in the config, it iterates in order and
+        returns the first viable match.
 
         Parameters
         ----------
@@ -1449,13 +1665,13 @@ class UploadClient:
             domains.
         domain
             The network domain (e.g., 'lan' or 'wan') in which the protocol must support
-            all operations.
+            the write operation.
 
         Returns
         -------
         Optional[str]
-            The name of a protocol implementation that can handle read/write/delete
-            for the specified domain, or None if no suitable protocol was found.
+            The name of a configured protocol implementation that can handle writes for
+            the specified domain, or None if no configured preference was viable.
         """
         preferred_protocols = []
         supported_impl = None
@@ -1464,37 +1680,40 @@ class UploadClient:
             preferred_impls = config_get('upload', 'preferred_impl')
         except Exception as error:
             self.logger(logging.INFO, 'No preferred protocol impl in rucio.cfg: %s' % (error))
-            pass
+            return None
         else:
-            preferred_impls = list(preferred_impls.split(', '))
-            i = 0
-            while i < len(preferred_impls):
-                impl = preferred_impls[i]
-                impl_split = impl.split('.')
-                if len(impl_split) == 1:
-                    preferred_impls[i] = 'rucio.rse.protocols.' + impl + '.Default'
+            configured_impls = preferred_impls
+            preferred_impls = []
+            for impl in configured_impls.split(','):
+                impl = impl.strip()
+                if not impl:
+                    continue
+                if impl.startswith('rucio.'):
+                    preferred_impls.append(impl)
+                elif '.' in impl:
+                    preferred_impls.append('rucio.rse.protocols.' + impl)
                 else:
-                    preferred_impls[i] = 'rucio.rse.protocols.' + impl
-                i += 1
+                    preferred_impls.append('rucio.rse.protocols.' + impl + '.Default')
 
-            preferred_protocols = [protocol for protocol in reversed(rse_settings['protocols']) if
-                                   protocol['impl'] in preferred_impls]
+            for preferred_impl in preferred_impls:
+                preferred_protocols.extend([
+                    protocol for protocol in rse_settings['protocols']
+                    if protocol['impl'] == preferred_impl and protocol not in preferred_protocols
+                ])
 
-        if len(preferred_protocols) > 0:
-            preferred_protocols += [protocol for protocol in reversed(rse_settings['protocols']) if
-                                    protocol not in preferred_protocols]
-        else:
-            preferred_protocols = reversed(rse_settings['protocols'])
+        if not preferred_protocols:
+            return None
 
         for protocol in preferred_protocols:
             if domain not in list(protocol['domains'].keys()):
                 self.logger(logging.DEBUG,
                             'Unsuitable protocol "%s": Domain %s not supported' % (protocol['impl'], domain))
                 continue
-            if not all(operations in protocol['domains'][domain] for operations in ("read", "write", "delete")):
+            if protocol['domains'][domain].get('write') is None:
                 self.logger(logging.DEBUG,
-                            'Unsuitable protocol "%s": All operations are not supported' % (protocol['impl']))
+                            'Unsuitable protocol "%s": Write operation is not supported' % (protocol['impl']))
                 continue
+            supported_protocol = None
             try:
                 supported_protocol = rsemgr.create_protocol(rse_settings, 'write', domain=domain, impl=protocol['impl'],
                                                             auth_token=self.auth_token, logger=self.logger)
@@ -1507,5 +1726,11 @@ class UploadClient:
                             'Preferred protocol impl supported locally and remotely: %s' % (protocol['impl']))
                 supported_impl = protocol['impl']
                 break
+            finally:
+                if supported_protocol is not None:
+                    try:
+                        supported_protocol.close()
+                    except Exception:
+                        self.logger(logging.DEBUG, 'Failed to close preferred protocol probe', exc_info=True)
 
         return supported_impl

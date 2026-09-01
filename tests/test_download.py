@@ -55,6 +55,316 @@ def _check_download_result(actual_result, expected_result):
             assert param_name and actual_result[i][param_name] == expected[param_name]
 
 
+def test_download_falls_back_after_preferred_transfer_failure(tmp_path):
+    download_client = DownloadClient.__new__(DownloadClient)
+    download_client.logger = MagicMock()
+    download_client.client = MagicMock(vo='def', host='localhost', user_agent='pytest')
+    download_client.check_pcache = False
+    download_client.auth_token = None
+    download_client.is_human_readable = False
+    preferred_impl = 'rucio.rse.protocols.xrootd.Default'
+    fallback_impl = 'rucio.rse.protocols.gfal.Default'
+    preferred_protocol = MagicMock()
+    preferred_protocol.get.side_effect = RucioException('native transfer failed')
+    fallback_protocol = MagicMock()
+
+    def successful_get(_pfn, destination, **_kwargs):
+        with open(destination, 'wb') as output:
+            output.write(b'data')
+
+    fallback_protocol.get.side_effect = successful_get
+    temp_file_path = str(tmp_path / 'download.part')
+    dest_file_path = str(tmp_path / 'downloaded')
+    item = {
+        'scope': 'mock',
+        'name': 'file',
+        'bytes': 4,
+        'sources': [{'pfn': 'root://example.com//file', 'rse': 'MOCK'}],
+        'dest_file_paths': [dest_file_path],
+        'temp_file_path': temp_file_path,
+        'preferred_impl': preferred_impl,
+        'merged_options': {'ignore_checksum': True},
+    }
+
+    def create_protocol(*_args, impl=None, protocol_attr=None, **_kwargs):
+        selected_impl = impl or (protocol_attr or {}).get('impl')
+        if selected_impl == preferred_impl:
+            return preferred_protocol
+        if selected_impl == fallback_impl:
+            return fallback_protocol
+        raise AssertionError('Unexpected implementation: %s' % selected_impl)
+
+    with patch.object(download_client, '_compute_actual_transfer_timeout', return_value=None), \
+            patch.object(download_client, '_send_trace'), \
+            patch('rucio.client.downloadclient.rsemgr.get_rse_info', return_value={}), \
+            patch('rucio.client.downloadclient.rsemgr.get_protocols_ordered', return_value=[
+                {'impl': preferred_impl},
+                {'impl': fallback_impl},
+            ]), \
+            patch('rucio.client.downloadclient.rsemgr.create_protocol', side_effect=create_protocol):
+        result = download_client._download_item(item, {}, None)
+
+    assert result['clientState'] == 'DONE'
+    assert preferred_protocol.get.call_count == 2
+    fallback_protocol.get.assert_called_once()
+    preferred_protocol.close.assert_called_once()
+    fallback_protocol.close.assert_called_once()
+    with open(dest_file_path, 'rb') as downloaded:
+        assert downloaded.read() == b'data'
+
+
+def test_download_preferred_impl_prioritizes_compatible_pfn(tmp_path):
+    download_client = DownloadClient.__new__(DownloadClient)
+    download_client.logger = MagicMock()
+    download_client.client = MagicMock(vo='def', host='localhost', user_agent='pytest')
+    download_client.check_pcache = False
+    download_client.auth_token = None
+    download_client.is_human_readable = False
+    preferred_impl = 'rucio.rse.protocols.xrootd.Default'
+    preferred_protocol = MagicMock()
+
+    def successful_get(_pfn, destination, **_kwargs):
+        with open(destination, 'wb') as output:
+            output.write(b'data')
+
+    preferred_protocol.get.side_effect = successful_get
+    root_pfn = 'root://example.com//file'
+    item = {
+        'scope': 'mock',
+        'name': 'file',
+        'bytes': 4,
+        'sources': [
+            {'pfn': 'scp://example.com/file', 'rse': 'MOCK'},
+            {'pfn': root_pfn, 'rse': 'MOCK'},
+        ],
+        'dest_file_paths': [str(tmp_path / 'downloaded')],
+        'temp_file_path': str(tmp_path / 'download.part'),
+        'preferred_impl': preferred_impl,
+        'merged_options': {'ignore_checksum': True},
+    }
+    rse_settings = {
+        'protocols': [
+            {
+                'scheme': 'scp',
+                'impl': 'rucio.rse.protocols.posix.Default',
+                'domains': {'wan': {'read': 1}},
+            },
+            {
+                'scheme': 'root',
+                'impl': preferred_impl,
+                'domains': {'wan': {'read': 1}},
+            },
+        ],
+    }
+
+    with patch.object(download_client, '_compute_actual_transfer_timeout', return_value=None), \
+            patch.object(download_client, '_send_trace'), \
+            patch('rucio.client.downloadclient.rsemgr.get_rse_info', return_value=rse_settings), \
+            patch('rucio.client.downloadclient.rsemgr.get_protocols_ordered', return_value=[
+                {'impl': preferred_impl},
+            ]), \
+            patch('rucio.client.downloadclient.rsemgr.create_protocol', return_value=preferred_protocol):
+        result = download_client._download_item(item, {}, None)
+
+    assert result['clientState'] == 'DONE'
+    assert preferred_protocol.get.call_args.args[0] == root_pfn
+    preferred_protocol.close.assert_called_once()
+
+
+def test_download_preferred_impl_ignores_nonreadable_protocol_record(tmp_path):
+    download_client = DownloadClient.__new__(DownloadClient)
+    download_client.logger = MagicMock()
+    download_client.client = MagicMock(vo='def', host='localhost', user_agent='pytest')
+    download_client.check_pcache = False
+    download_client.auth_token = None
+    download_client.is_human_readable = False
+    preferred_impl = 'rucio.rse.protocols.xrootd.Default'
+    preferred_protocol = MagicMock()
+
+    def successful_get(_pfn, destination, **_kwargs):
+        with open(destination, 'wb') as output:
+            output.write(b'data')
+
+    preferred_protocol.get.side_effect = successful_get
+    readable_pfn = 'root://readable.example//file'
+    item = {
+        'scope': 'mock',
+        'name': 'file',
+        'bytes': 4,
+        'sources': [
+            {'pfn': 'root://nonreadable.example//file', 'rse': 'NONREADABLE'},
+            {'pfn': readable_pfn, 'rse': 'READABLE'},
+        ],
+        'dest_file_paths': [str(tmp_path / 'downloaded')],
+        'temp_file_path': str(tmp_path / 'download.part'),
+        'preferred_impl': preferred_impl,
+        'merged_options': {'ignore_checksum': True},
+    }
+    nonreadable_attr = {
+        'scheme': 'root',
+        'impl': preferred_impl,
+        'domains': {'wan': {'read': None}},
+    }
+    readable_attr = {
+        'scheme': 'root',
+        'impl': preferred_impl,
+        'domains': {'wan': {'read': 1}},
+    }
+    settings = {
+        'NONREADABLE': {'protocols': [nonreadable_attr]},
+        'READABLE': {'protocols': [readable_attr]},
+    }
+
+    with patch.object(download_client, '_compute_actual_transfer_timeout', return_value=None), \
+            patch.object(download_client, '_send_trace'), \
+            patch('rucio.client.downloadclient.rsemgr.get_rse_info', side_effect=lambda name, **_kwargs: settings[name]), \
+            patch('rucio.client.downloadclient.rsemgr.get_protocols_ordered', return_value=[readable_attr]), \
+            patch('rucio.client.downloadclient.rsemgr.create_protocol', return_value=preferred_protocol):
+        result = download_client._download_item(item, {}, None)
+
+    assert result['clientState'] == 'DONE'
+    assert preferred_protocol.get.call_args.args[0] == readable_pfn
+
+
+def test_download_default_preserves_load_balanced_protocol_record(tmp_path):
+    download_client = DownloadClient.__new__(DownloadClient)
+    download_client.logger = MagicMock()
+    download_client.client = MagicMock(vo='def', host='localhost', user_agent='pytest')
+    download_client.check_pcache = False
+    download_client.auth_token = None
+    download_client.is_human_readable = False
+    implementation = 'rucio.rse.protocols.xrootd.Default'
+    first_attr = {
+        'scheme': 'root',
+        'hostname': 'first.example',
+        'impl': implementation,
+        'domains': {'wan': {'read': 1}},
+    }
+    balanced_attr = {
+        'scheme': 'root',
+        'hostname': 'balanced.example',
+        'impl': implementation,
+        'domains': {'wan': {'read': 1}},
+    }
+    protocol = MagicMock()
+
+    def successful_get(_pfn, destination, **_kwargs):
+        with open(destination, 'wb') as output:
+            output.write(b'data')
+
+    protocol.get.side_effect = successful_get
+    item = {
+        'scope': 'mock',
+        'name': 'file',
+        'bytes': 4,
+        'sources': [{'pfn': 'root://balanced.example//file', 'rse': 'MOCK'}],
+        'dest_file_paths': [str(tmp_path / 'downloaded')],
+        'temp_file_path': str(tmp_path / 'download.part'),
+        'preferred_impl': None,
+        'merged_options': {'ignore_checksum': True},
+    }
+
+    with patch.object(download_client, '_compute_actual_transfer_timeout', return_value=None), \
+            patch.object(download_client, '_send_trace'), \
+            patch('rucio.client.downloadclient.rsemgr.get_rse_info', return_value={}), \
+            patch('rucio.client.downloadclient.rsemgr.select_protocol', return_value=balanced_attr), \
+            patch('rucio.client.downloadclient.rsemgr.get_protocols_ordered', return_value=[first_attr, balanced_attr]), \
+            patch('rucio.client.downloadclient.rsemgr.create_protocol', return_value=protocol) as create_protocol:
+        result = download_client._download_item(item, {}, None)
+
+    assert result['clientState'] == 'DONE'
+    assert create_protocol.call_args_list[0].kwargs['protocol_attr'] is balanced_attr
+
+
+def test_download_falls_back_when_preferred_probe_failed(tmp_path):
+    download_client = DownloadClient.__new__(DownloadClient)
+    download_client.logger = MagicMock()
+    download_client.client = MagicMock(vo='def', host='localhost', user_agent='pytest')
+    download_client.check_pcache = False
+    download_client.auth_token = None
+    download_client.is_human_readable = False
+    native_impl = 'rucio.rse.protocols.xrootd.Default'
+    fallback_impl = 'rucio.rse.protocols.gfal.Default'
+    native_protocol = MagicMock()
+    native_protocol.connect.side_effect = RucioException('native connect failed')
+    fallback_protocol = MagicMock()
+
+    def successful_get(_pfn, destination, **_kwargs):
+        with open(destination, 'wb') as output:
+            output.write(b'data')
+
+    fallback_protocol.get.side_effect = successful_get
+    dest_file_path = str(tmp_path / 'downloaded')
+    item = {
+        'scope': 'mock',
+        'name': 'file',
+        'bytes': 4,
+        'sources': [{'pfn': 'root://example.com//file', 'rse': 'MOCK'}],
+        'dest_file_paths': [dest_file_path],
+        'temp_file_path': str(tmp_path / 'download.part'),
+        'preferred_impl': None,
+        'merged_options': {'ignore_checksum': True},
+    }
+
+    def create_protocol(*_args, impl=None, protocol_attr=None, **_kwargs):
+        selected_impl = impl or (protocol_attr or {}).get('impl')
+        if selected_impl == native_impl:
+            return native_protocol
+        if selected_impl == fallback_impl:
+            return fallback_protocol
+        raise AssertionError('Unexpected implementation: %s' % selected_impl)
+
+    with patch.object(download_client, '_compute_actual_transfer_timeout', return_value=None), \
+            patch.object(download_client, '_send_trace'), \
+            patch('rucio.client.downloadclient.rsemgr.get_rse_info', return_value={}), \
+            patch('rucio.client.downloadclient.rsemgr.select_protocol', return_value={'impl': native_impl}), \
+            patch('rucio.client.downloadclient.rsemgr.get_protocols_ordered', return_value=[
+                {'impl': native_impl},
+                {'impl': fallback_impl},
+            ]), \
+            patch('rucio.client.downloadclient.rsemgr.create_protocol', side_effect=create_protocol):
+        result = download_client._download_item(item, {}, None)
+
+    assert result['clientState'] == 'DONE'
+    native_protocol.get.assert_not_called()
+    native_protocol.close.assert_called_once()
+    fallback_protocol.get.assert_called_once()
+    fallback_protocol.close.assert_called_once()
+
+
+def test_download_preferred_impl_keeps_configured_order_across_sources():
+    download_client = DownloadClient.__new__(DownloadClient)
+    download_client.logger = MagicMock()
+    download_client.client = MagicMock(vo='def')
+    download_client.auth_token = None
+    xrootd_impl = 'rucio.rse.protocols.xrootd.Default'
+    rclone_impl = 'rucio.rse.protocols.rclone.Default'
+    xrootd_attr = {
+        'impl': xrootd_impl,
+        'domains': {'wan': {'read': 1}},
+    }
+    rclone_attr = {
+        'impl': rclone_impl,
+        'domains': {'wan': {'read': 1}},
+    }
+    settings = {
+        'XROOTD': {'protocols': [xrootd_attr]},
+        'RCLONE': {'protocols': [rclone_attr]},
+    }
+    protocol = MagicMock()
+
+    with patch('rucio.client.downloadclient.config_get', return_value='xrootd,rclone'), \
+            patch('rucio.client.downloadclient.rsemgr.get_rse_info', side_effect=lambda name, **_kwargs: settings[name]), \
+            patch('rucio.client.downloadclient.rsemgr.create_protocol', return_value=protocol) as create_protocol:
+        result = download_client.preferred_impl([
+            {'rse': 'XROOTD'},
+            {'rse': 'RCLONE'},
+        ])
+
+    assert result == xrootd_impl
+    assert create_protocol.call_args.kwargs['protocol_attr'] is xrootd_attr
+
+
 def test_download_without_base_dir(rse_factory, did_factory, download_client):
     scope = str(did_factory.default_scope)
     rse, _ = rse_factory.make_posix_rse()
@@ -732,7 +1042,7 @@ def test_download_file_with_supported_protocol_from_config(rse_factory, did_fact
     with patch('rucio.rse.protocols.%s.Default.get' % supported_impl, side_effect=lambda pfn, dest, **kw: shutil.copy(path, dest)) as mock_get, \
             patch('rucio.rse.protocols.%s.Default.connect' % supported_impl), \
             patch('rucio.rse.protocols.%s.Default.close' % supported_impl):
-        download_client.download_dids([{'did': did_str, 'impl': supported_impl}])
+        download_client.download_dids([{'did': did_str}])
         mock_get.assert_called()
 
 
